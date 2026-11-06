@@ -171,7 +171,7 @@ def run_gui():
     top.addWidget(title)
     top.addStretch()
 
-    theme_btn = QPushButton("Sáng / Tối")
+    theme_btn = QPushButton("Theme")
     theme_btn.setObjectName("SecondaryBtn")
     theme_btn.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -191,7 +191,7 @@ def run_gui():
     card_layout.setSpacing(12)
 
     hwid_input = QLineEdit()
-    hwid_input.setPlaceholderText("HWID (Tùy chọn)...")
+    hwid_input.setPlaceholderText("HWID (Optional)...")
     hwid_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
     card_layout.addWidget(hwid_input)
 
@@ -210,19 +210,19 @@ def run_gui():
         out_input.setText(k)
         QApplication.clipboard().setText(k)
 
-    b1 = QPushButton("KEY 24H")
+    b1 = QPushButton("24H KEY")
     b1.setObjectName("BtnAmber")
     b1.setCursor(Qt.CursorShape.PointingHandCursor)
     b1.clicked.connect(lambda: gen("trial_24h"))
     btn_row.addWidget(b1)
 
-    b2 = QPushButton("KEY 30 NGÀY")
+    b2 = QPushButton("30-DAY KEY")
     b2.setObjectName("BtnSky")
     b2.setCursor(Qt.CursorShape.PointingHandCursor)
     b2.clicked.connect(lambda: gen("monthly"))
     btn_row.addWidget(b2)
 
-    b3 = QPushButton("KEY LIFETIME")
+    b3 = QPushButton("LIFETIME KEY")
     b3.setObjectName("BtnGreen")
     b3.setCursor(Qt.CursorShape.PointingHandCursor)
     b3.clicked.connect(lambda: gen("lifetime"))

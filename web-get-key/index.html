@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="vi" data-theme="dark">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -462,7 +462,7 @@
         </div>
         <span>CHESS STEALTH PRO</span>
       </div>
-      <button id="theme-toggle" class="theme-btn" type="button" aria-label="Đổi giao diện Sáng / Tối">
+      <button id="theme-toggle" class="theme-btn" type="button" aria-label="Toggle Light / Dark Theme">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <circle cx="12" cy="12" r="5"></circle>
           <line x1="12" y1="1" x2="12" y2="3"></line>
@@ -477,22 +477,22 @@
       </button>
     </header>
 
-    <!-- MÀN HÌNH 1: CHỌN CỔNG & VƯỢT 2 CHẶNG -->
+    <!-- VIEW 1: SELECT PROVIDER & COMPLETE 2 CHECKPOINTS -->
     <main id="checkpoint-view" class="card hidden">
-      <h1 id="cp-title">Nhận Key 24 Giờ</h1>
+      <h1 id="cp-title">Get 24-Hour Key</h1>
 
-      <div class="stepper" aria-label="Tiến trình 2 chặng">
+      <div class="stepper" aria-label="Checkpoint progress">
         <div id="step-box-1" class="step-item active">
           <span class="step-num">1</span>
-          <span id="step-text-1" class="step-state">Chặng 1</span>
+          <span id="step-text-1" class="step-state">Step 1</span>
         </div>
         <div id="step-box-2" class="step-item">
           <span class="step-num">2</span>
-          <span id="step-text-2" class="step-state">Chặng 2</span>
+          <span id="step-text-2" class="step-state">Step 2</span>
         </div>
       </div>
 
-      <div class="provider-grid" role="group" aria-label="Chọn cổng vượt link">
+      <div class="provider-grid" role="group" aria-label="Select link provider">
         <!-- 1. LINK4M -->
         <button id="prov-link4m" class="provider-btn selected" type="button">
           <div class="prov-logo logo-link4m" aria-hidden="true">
@@ -540,7 +540,7 @@
       </div>
 
       <button id="go-step-btn" class="btn-primary" type="button">
-        <span id="go-step-text">TIẾP TỤC (1 / 2)</span>
+        <span id="go-step-text">CONTINUE (1 / 2)</span>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <line x1="5" y1="12" x2="19" y2="12"></line>
           <polyline points="12 5 19 12 12 19"></polyline>
@@ -548,9 +548,9 @@
       </button>
     </main>
 
-    <!-- MÀN HÌNH 2: HIỂN THỊ KEY -->
+    <!-- VIEW 2: DISPLAY KEY -->
     <main id="valid-view" class="card hidden">
-      <h1>Key 24 Giờ Của Bạn</h1>
+      <h1>Your 24-Hour Key</h1>
 
       <div class="key-box">
         <div id="key-display" class="key-value">...</div>
@@ -562,29 +562,29 @@
             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
           </svg>
-          <span id="copy-text">SAO CHÉP KEY</span>
+          <span id="copy-text">COPY KEY</span>
         </button>
 
         <a id="open-app-btn" href="#" class="btn-secondary">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
           </svg>
-          <span>MỞ TRỰC TIẾP TRÊN APP</span>
+          <span>OPEN IN DESKTOP APP</span>
         </a>
       </div>
 
       <div class="meta-row">
-        <span>Thời hạn:</span>
+        <span>Expires in:</span>
         <span id="countdown" class="timer">23:59:59</span>
       </div>
     </main>
 
-    <!-- MÀN HÌNH 3: LỖI -->
+    <!-- VIEW 3: ERROR -->
     <main id="error-view" class="card hidden" role="alert">
-      <h1 id="error-title">Đường Dẫn Không Hợp Lệ</h1>
-      <p id="error-desc" class="error-msg">Vui lòng thực hiện tuần tự từ Chặng 1.</p>
+      <h1 id="error-title">Invalid Link</h1>
+      <p id="error-desc" class="error-msg">Please complete the steps in order starting from Step 1.</p>
       <button id="reset-claim-btn" class="btn-primary" type="button">
-        <span>QUAY LẠI</span>
+        <span>BACK TO START</span>
       </button>
     </main>
   </div>
@@ -720,20 +720,20 @@
 
         if (stepDone === 0) {
           currentTargetStep = 1;
-          cpTitle.textContent = 'Nhận Key 24 Giờ';
+          cpTitle.textContent = 'Get 24-Hour Key';
           stepBox1.className = 'step-item active';
           stepBox2.className = 'step-item';
-          stepText1.textContent = 'Chặng 1';
-          stepText2.textContent = 'Chặng 2';
-          goStepText.textContent = 'VƯỢT CHẶNG 1 (1 / 2)';
+          stepText1.textContent = 'Step 1';
+          stepText2.textContent = 'Step 2';
+          goStepText.textContent = 'CONTINUE STEP 1 (1 / 2)';
         } else {
           currentTargetStep = 2;
-          cpTitle.textContent = 'Hoàn Thành Chặng 1';
+          cpTitle.textContent = 'Step 1 Completed';
           stepBox1.className = 'step-item done';
           stepBox2.className = 'step-item active';
-          stepText1.textContent = 'Đã xong';
-          stepText2.textContent = 'Chặng 2';
-          goStepText.textContent = 'VƯỢT CHẶNG 2 (2 / 2)';
+          stepText1.textContent = 'Completed';
+          stepText2.textContent = 'Step 2';
+          goStepText.textContent = 'CONTINUE STEP 2 (2 / 2)';
         }
       }
 
@@ -780,7 +780,7 @@
         if (urlTokenParam) {
           const parts = urlTokenParam.trim().toUpperCase().split('-');
           if (parts.length !== 3 || parts[0].length !== 6 || parts[1].length !== 8 || parts[2].length !== 10) {
-            showErrorState('URL Không Hợp Lệ', 'Đường dẫn đã bị thay đổi.');
+            showErrorState('Invalid URL', 'The key URL has been modified.');
             return;
           }
 
@@ -788,13 +788,13 @@
           const expSec = parseInt(expHex, 16);
           const expectedUrlSig = (await hmacHex(`URL:${tId}:${expHex}`)).slice(0, 10);
           if (isNaN(expSec) || providedSig !== expectedUrlSig) {
-            showErrorState('URL Không Hợp Lệ', 'Chữ ký đường dẫn không khớp.');
+            showErrorState('Invalid URL', 'URL signature verification failed.');
             return;
           }
 
           if (expSec <= nowSec) {
             try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
-            showErrorState('Key Đã Hết Hạn', 'Key 24 giờ đã tự động xóa.');
+            showErrorState('Key Expired', 'Your 24-hour key has expired.');
             return;
           }
 
@@ -824,7 +824,7 @@
 
         if (stepParam === '2') {
           if (!stepState.step1Completed || (nowSec - (stepState.step1Time || 0)) > 7200) {
-            showErrorState('Chưa Qua Chặng 1', 'Vui lòng vượt Chặng 1 trước.');
+            showErrorState('Step 1 Required', 'Please complete Step 1 first.');
             return;
           }
 
@@ -866,9 +866,9 @@
         if (!activeClaim) return;
         try {
           await navigator.clipboard.writeText(activeClaim.licenseKey);
-          copyText.textContent = 'ĐÃ SAO CHÉP';
+          copyText.textContent = 'COPIED';
           setTimeout(() => {
-            copyText.textContent = 'SAO CHÉP KEY';
+            copyText.textContent = 'COPY KEY';
           }, 2000);
         } catch (_) {
           const range = document.createRange();
@@ -877,7 +877,7 @@
           sel.removeAllRanges();
           sel.addRange(range);
           document.execCommand('copy');
-          copyText.textContent = 'ĐÃ SAO CHÉP';
+          copyText.textContent = 'COPIED';
         }
       });
 
@@ -886,7 +886,7 @@
         const nowSec = Math.floor(Date.now() / 1000);
         const rem = Math.max(0, activeClaim.expSec - nowSec);
         if (rem === 0) {
-          showErrorState('Key Đã Hết Hạn', 'Key 24 giờ đã tự động xóa.');
+          showErrorState('Key Expired', 'Your 24-hour key has expired.');
           return;
         }
         const h = String(Math.floor(rem / 3600)).padStart(2, '0');

@@ -94,7 +94,7 @@ def _direct_supabase_verify_or_activate(clean_key: str, hwid_val: str, nonce: st
                 "status": "invalid",
                 "hwid": None,
                 "expires_at": None,
-                "message": "ERR_AUTH_0x1A: Mã bản quyền không tồn tại trên hệ thống Supabase.",
+                "message": "Invalid license key.",
                 "server_time": now,
                 "nonce": nonce,
             }
@@ -109,7 +109,7 @@ def _direct_supabase_verify_or_activate(clean_key: str, hwid_val: str, nonce: st
                 "status": row["status"],
                 "hwid": row["hwid"],
                 "expires_at": row["expires_at"],
-                "message": f"ERR_STATE_0x2B: Mã bản quyền đã {row['status']}.",
+                "message": f"License key is {row['status']}.",
                 "server_time": now,
                 "nonce": nonce,
             }
@@ -124,7 +124,7 @@ def _direct_supabase_verify_or_activate(clean_key: str, hwid_val: str, nonce: st
                 "status": "hwid_mismatch",
                 "hwid": row["hwid"],
                 "expires_at": row["expires_at"],
-                "message": "ERR_HWID_0x3C: Mã Key này đã được gắn với thiết bị phần cứng khác.",
+                "message": "This key is bound to another device.",
                 "server_time": now,
                 "nonce": nonce,
             }
@@ -161,9 +161,9 @@ def _direct_supabase_verify_or_activate(clean_key: str, hwid_val: str, nonce: st
         conn.commit()
 
         label_map = {
-            "trial_24h": "Key 24 Giờ (Supabase)",
-            "monthly": "Key 30 Ngày (Supabase)",
-            "lifetime": "Key Vĩnh Viễn (Supabase)",
+            "trial_24h": "24-Hour Key",
+            "monthly": "30-Day Key",
+            "lifetime": "Lifetime Key",
         }
         payload = {
             "valid": True,
@@ -172,7 +172,7 @@ def _direct_supabase_verify_or_activate(clean_key: str, hwid_val: str, nonce: st
             "status": "active",
             "hwid": hwid_val,
             "expires_at": expires_at,
-            "message": f"Kích hoạt thành công: {label_map.get(row['type'], row['type'])}",
+            "message": f"Activated: {label_map.get(row['type'], row['type'])}",
             "server_time": now,
             "nonce": nonce,
         }
@@ -227,29 +227,29 @@ def activate_or_verify_key(
                 cached_ok, cached_msg = load_valid_offline_cache(clean_key, hwid_val)
                 if cached_ok:
                     return True, cached_msg
-                return False, "ERR_NET_UNREACHABLE: Không thể kết nối máy chủ Supabase."
+                return False, "Cannot connect to license server."
 
         if endpoint == "/verify" and resp_data.get("status") == "unactivated":
             continue
 
         sig = resp_data.get("signature", "")
         if not verify_response_signature(resp_data, sig, ED25519_PUBLIC_KEY_HEX):
-            return False, "ERR_SIG_MISMATCH: Phát hiện can thiệp dữ liệu mạng (MITM/Proxy)!"
+            return False, "Signature mismatch."
 
         if resp_data.get("nonce") != nonce:
-            return False, "ERR_NONCE_REPLAY: Phản hồi mạng không hợp lệ (Replay Attack)!"
+            return False, "Invalid response nonce."
 
         if resp_data.get("valid") is True and resp_data.get("hwid") == hwid_val:
             _ACTIVE_SESSION_PAYLOAD = resp_data
             _ACTIVE_SESSION_SIGNATURE = sig
             _save_offline_cache(resp_data, sig)
-            return True, str(resp_data.get("message", "Kích hoạt thành công"))
+            return True, str(resp_data.get("message", "Activated"))
         else:
-            if endpoint == "/verify" and "chưa được kích hoạt" in str(resp_data.get("message", "")).lower():
+            if endpoint == "/verify" and "not activated" in str(resp_data.get("message", "")).lower():
                 continue
-            return False, str(resp_data.get("message", "Mã Key không hợp lệ."))
+            return False, str(resp_data.get("message", "Invalid license key."))
 
-    return False, "Xác thực thất bại."
+    return False, "Verification failed."
 
 
 def derive_arrow_scale_factor() -> float:

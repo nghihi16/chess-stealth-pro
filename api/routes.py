@@ -111,7 +111,7 @@ async def verify_license(req: VerifyRequest, request: Request):
                 status="invalid",
                 hwid=None,
                 expires_at=None,
-                message="ERR_AUTH_0x1A: Xác thực bản quyền không thành công.",
+                message="Invalid license key.",
                 nonce=req.nonce,
             )
 
@@ -124,7 +124,7 @@ async def verify_license(req: VerifyRequest, request: Request):
                 status=row["status"],
                 hwid=row["hwid"],
                 expires_at=row["expires_at"],
-                message=f"ERR_STATE_0x2B: Mã bản quyền hiện ở trạng thái {row['status']}.",
+                message=f"License key is {row['status']}.",
                 nonce=req.nonce,
             )
 
@@ -136,7 +136,7 @@ async def verify_license(req: VerifyRequest, request: Request):
                 status="unactivated",
                 hwid=None,
                 expires_at=row["expires_at"],
-                message="Mã Key chưa được kích hoạt lần đầu.",
+                message="License key is not activated yet.",
                 nonce=req.nonce,
             )
 
@@ -149,16 +149,16 @@ async def verify_license(req: VerifyRequest, request: Request):
                 status="hwid_mismatch",
                 hwid=row["hwid"],
                 expires_at=row["expires_at"],
-                message="ERR_HWID_0x3C: Mã bản quyền đã gắn với thiết bị phần cứng khác.",
+                message="This key is bound to another device.",
                 nonce=req.nonce,
             )
 
         _log_audit(conn, row["id"], hwid_clean, ip, req.app_version, "verify")
 
-        rem_msg = "Vĩnh viễn (Lifetime)"
+        rem_msg = "Lifetime"
         if row["expires_at"]:
             rem = max(0, int(row["expires_at"]) - int(time.time()))
-            rem_msg = f"Còn {rem // 3600}h {(rem % 3600) // 60}p"
+            rem_msg = f"{rem // 3600}h {(rem % 3600) // 60}m left"
 
         return _build_signed_response(
             valid=True,
@@ -167,7 +167,7 @@ async def verify_license(req: VerifyRequest, request: Request):
             status="active",
             hwid=hwid_clean,
             expires_at=row["expires_at"],
-            message=f"Hợp lệ ({row['type']} — {rem_msg})",
+            message=f"Valid ({row['type']} — {rem_msg})",
             nonce=req.nonce,
         )
 
@@ -198,7 +198,7 @@ async def activate_license(req: ActivateRequest, request: Request):
                 status="invalid",
                 hwid=None,
                 expires_at=None,
-                message="ERR_AUTH_0x1A: Mã bản quyền không tồn tại.",
+                message="Invalid license key.",
                 nonce=req.nonce,
             )
 
@@ -210,7 +210,7 @@ async def activate_license(req: ActivateRequest, request: Request):
                 status=row["status"],
                 hwid=row["hwid"],
                 expires_at=row["expires_at"],
-                message=f"ERR_STATE_0x2B: Mã bản quyền đã {row['status']}.",
+                message=f"License key is {row['status']}.",
                 nonce=req.nonce,
             )
 
@@ -222,7 +222,7 @@ async def activate_license(req: ActivateRequest, request: Request):
                 status="hwid_mismatch",
                 hwid=row["hwid"],
                 expires_at=row["expires_at"],
-                message="ERR_HWID_0x3C: Mã Key này đã được kích hoạt trên máy tính khác.",
+                message="This key is bound to another device.",
                 nonce=req.nonce,
             )
 
@@ -250,9 +250,9 @@ async def activate_license(req: ActivateRequest, request: Request):
         _log_audit(conn, row["id"], hwid_clean, ip, req.app_version, "activate")
 
         label_map = {
-            "trial_24h": "Key 24 Giờ",
-            "monthly": "Key 30 Ngày",
-            "lifetime": "Key Vĩnh Viễn (Lifetime)",
+            "trial_24h": "24-Hour Key",
+            "monthly": "30-Day Key",
+            "lifetime": "Lifetime Key",
         }
         return _build_signed_response(
             valid=True,
@@ -261,7 +261,7 @@ async def activate_license(req: ActivateRequest, request: Request):
             status="active",
             hwid=hwid_clean,
             expires_at=expires_at,
-            message=f"Kích hoạt thành công: {label_map.get(row['type'], row['type'])}",
+            message=f"Activated: {label_map.get(row['type'], row['type'])}",
             nonce=req.nonce,
         )
 

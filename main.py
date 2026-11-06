@@ -716,12 +716,12 @@ def show_browser_selector(_license_info: str, active_key: str, hwid: str):
 
     top = QHBoxLayout()
     top.addWidget(KnightLogoWidget(36))
-    title = QLabel("Chọn Trình Duyệt")
+    title = QLabel("Select Browser")
     title.setObjectName("Title")
     top.addWidget(title)
     top.addStretch()
 
-    theme_btn = QPushButton("Sáng / Tối")
+    theme_btn = QPushButton("Theme")
     theme_btn.setObjectName("SecondaryBtn")
     theme_btn.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -745,7 +745,7 @@ def show_browser_selector(_license_info: str, active_key: str, hwid: str):
         ("Min Browser", "min"),
         ("Brave Browser", "brave"),
         ("Google Chrome", "chrome"),
-        ("Chỉ bật Overlay", "other"),
+        ("Overlay Only", "other"),
     ]
     selected_browser = {"val": "min"}
 
@@ -760,7 +760,7 @@ def show_browser_selector(_license_info: str, active_key: str, hwid: str):
 
     layout.addWidget(card)
 
-    start_btn = QPushButton("BẮT ĐẦU")
+    start_btn = QPushButton("LAUNCH")
     start_btn.setObjectName("PrimaryBtn")
     start_btn.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -819,12 +819,12 @@ def main():
 
     def copy_hwid():
         QApplication.clipboard().setText(hwid)
-        copy_hwid_btn.setText("Đã chép")
+        copy_hwid_btn.setText("Copied")
 
     copy_hwid_btn.clicked.connect(copy_hwid)
     top.addWidget(copy_hwid_btn)
 
-    theme_btn = QPushButton("Sáng / Tối")
+    theme_btn = QPushButton("Theme")
     theme_btn.setObjectName("SecondaryBtn")
     theme_btn.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -845,13 +845,13 @@ def main():
     card_layout.setSpacing(12)
 
     key_input = QLineEdit()
-    key_input.setPlaceholderText("Nhập License Key...")
+    key_input.setPlaceholderText("Enter License Key...")
     key_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
     if saved_key:
         key_input.setText(saved_key)
     card_layout.addWidget(key_input)
 
-    act_btn = QPushButton("KÍCH HOẠT")
+    act_btn = QPushButton("ACTIVATE")
     act_btn.setObjectName("PrimaryBtn")
     act_btn.setCursor(Qt.CursorShape.PointingHandCursor)
     card_layout.addWidget(act_btn)
@@ -861,13 +861,13 @@ def main():
     bottom = QHBoxLayout()
     bottom.setSpacing(10)
 
-    get_key_btn = QPushButton("Lấy Key 24h")
+    get_key_btn = QPushButton("Get 24h Key")
     get_key_btn.setObjectName("SecondaryBtn")
     get_key_btn.setCursor(Qt.CursorShape.PointingHandCursor)
     get_key_btn.clicked.connect(lambda: os.startfile(WEB_GET_KEY_URL))
     bottom.addWidget(get_key_btn)
 
-    buy_btn = QPushButton("Mua Key VIP")
+    buy_btn = QPushButton("Buy VIP Key")
     buy_btn.setObjectName("SecondaryBtn")
     buy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
     buy_btn.clicked.connect(lambda: os.startfile(BUY_LIFE_URL))
@@ -877,7 +877,7 @@ def main():
     def handle_activate():
         k = key_input.text().strip()
         if not k:
-            QMessageBox.warning(win, "Thiếu Key", "Vui lòng nhập mã License Key!")
+            QMessageBox.warning(win, "Missing Key", "Please enter your License Key.")
             return
         valid, msg = activate_or_verify_key(API_BASE_URL, k, hwid)
         if valid:
@@ -889,7 +889,7 @@ def main():
             win.close()
             show_browser_selector(msg, k, hwid)
         else:
-            QMessageBox.critical(win, "Lỗi", msg)
+            QMessageBox.critical(win, "Error", msg)
 
     act_btn.clicked.connect(handle_activate)
     key_input.returnPressed.connect(handle_activate)
