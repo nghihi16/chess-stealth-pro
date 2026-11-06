@@ -1,8 +1,8 @@
 import os
 import sys
 
-from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPolygonF
+from PySide6.QtCore import QByteArray, Qt
+from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -20,51 +20,51 @@ if sys.stderr is None:
     sys.stderr = open(os.devnull, "w", encoding="utf-8")
 
 from db.database import create_license_record, get_connection
+from logo_assets import LOGOS
 
 _CURRENT_THEME = "dark"
 
 
-class KnightLogoWidget(QWidget):
-    def __init__(self, size: int = 36, parent=None):
-        super().__init__(parent)
-        self.setFixedSize(size, size)
+def pixmap_from_data_uri(data_uri: str, size: int) -> QPixmap:
+    raw_b64 = data_uri.split(",", 1)[1] if "," in data_uri else data_uri
+    ba = QByteArray.fromBase64(raw_b64.encode("ascii"))
+    pm = QPixmap()
+    pm.loadFromData(ba)
+    return pm.scaled(
+        size,
+        size,
+        Qt.AspectRatioMode.KeepAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
+    )
 
-    def paintEvent(self, _event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-        bg_path = QPainterPath()
-        bg_path.addRoundedRect(1, 1, self.width() - 2, self.height() - 2, 10, 10)
-        p.fillPath(bg_path, QColor(245, 158, 11, 36))
-        p.setPen(QPen(QColor("#f59e0b"), 1.5))
-        p.drawPath(bg_path)
+def app_icon() -> QIcon:
+    return QIcon(pixmap_from_data_uri(LOGOS["pawn"], 128))
 
-        s = self.width() / 24.0
-        knight_pts = QPolygonF(
-            [
-                QPointF(7 * s, 18 * s),
-                QPointF(8 * s, 12 * s),
-                QPointF(5 * s, 10 * s),
-                QPointF(7 * s, 5 * s),
-                QPointF(11 * s, 6 * s),
-                QPointF(14 * s, 3 * s),
-                QPointF(17 * s, 7 * s),
-                QPointF(18 * s, 12 * s),
-                QPointF(17 * s, 18 * s),
-            ]
-        )
-        p.setPen(
-            QPen(
-                QColor("#f59e0b"),
-                1.8,
-                Qt.PenStyle.SolidLine,
-                Qt.PenCapStyle.RoundCap,
-                Qt.PenJoinStyle.RoundJoin,
-            )
-        )
-        p.setBrush(QColor(245, 158, 11, 55))
-        p.drawPolygon(knight_pts)
-        p.drawLine(QPointF(5 * s, 20.5 * s), QPointF(19 * s, 20.5 * s))
+
+def build_brand_header() -> QWidget:
+    w = QWidget()
+    h = QHBoxLayout(w)
+    h.setContentsMargins(0, 0, 0, 0)
+    h.setSpacing(10)
+
+    logo_lbl = QLabel()
+    logo_lbl.setPixmap(pixmap_from_data_uri(LOGOS["pawn"], 46))
+    logo_lbl.setFixedSize(46, 46)
+    h.addWidget(logo_lbl)
+
+    txt_col = QVBoxLayout()
+    txt_col.setContentsMargins(0, 0, 0, 0)
+    txt_col.setSpacing(0)
+
+    c_lbl = QLabel("C H E S S")
+    c_lbl.setObjectName("BrandChess")
+    s_lbl = QLabel("S T E A L T H   •   K E Y G E N")
+    s_lbl.setObjectName("BrandStealth")
+    txt_col.addWidget(c_lbl)
+    txt_col.addWidget(s_lbl)
+    h.addLayout(txt_col)
+    return w
 
 
 def _build_qss(theme: str) -> str:
@@ -72,13 +72,14 @@ def _build_qss(theme: str) -> str:
         return """
         QWidget#Root { background-color: #f1f5f9; color: #0f172a; font-family: 'Segoe UI'; }
         QFrame#Card { background-color: #ffffff; border: 1px solid #cbd5e1; border-radius: 16px; }
-        QLabel#Title { color: #0f172a; font-size: 16px; font-weight: 700; }
+        QLabel#BrandChess { color: #0f172a; font-size: 16px; font-weight: 800; }
+        QLabel#BrandStealth { color: #0284c7; font-size: 10px; font-weight: 800; }
         QLineEdit {
             background-color: #f8fafc; color: #0f172a;
             border: 1px solid #cbd5e1; border-radius: 10px;
             padding: 10px 12px; font-family: 'Consolas'; font-size: 14px; font-weight: 700;
         }
-        QLineEdit:focus { border: 2px solid #d97706; background-color: #ffffff; }
+        QLineEdit:focus { border: 2px solid #0284c7; background-color: #ffffff; }
         QLineEdit#KeyOut { color: #047857; background-color: #f1f5f9; }
         QPushButton#BtnAmber {
             background-color: #d97706; color: #ffffff;
@@ -100,40 +101,41 @@ def _build_qss(theme: str) -> str:
             border: 1px solid #cbd5e1; border-radius: 10px;
             min-height: 40px; font-size: 12px; font-weight: 600; padding: 0 12px;
         }
-        QPushButton#SecondaryBtn:hover { border: 1px solid #d97706; }
+        QPushButton#SecondaryBtn:hover { border: 1px solid #0284c7; }
         """
     return """
-    QWidget#Root { background-color: #090b10; color: #f8fafc; font-family: 'Segoe UI'; }
-    QFrame#Card { background-color: #12151e; border: 1px solid #262b3d; border-radius: 16px; }
-    QLabel#Title { color: #f8fafc; font-size: 16px; font-weight: 700; }
+    QWidget#Root { background-color: #060911; color: #f8fafc; font-family: 'Segoe UI'; }
+    QFrame#Card { background-color: #0d121e; border: 1px solid #1e293b; border-radius: 16px; }
+    QLabel#BrandChess { color: #f8fafc; font-size: 16px; font-weight: 800; }
+    QLabel#BrandStealth { color: #22d3ee; font-size: 10px; font-weight: 800; }
     QLineEdit {
-        background-color: #1a1f2e; color: #f8fafc;
-        border: 1px solid #2e364f; border-radius: 10px;
+        background-color: #161e2e; color: #f8fafc;
+        border: 1px solid #283548; border-radius: 10px;
         padding: 10px 12px; font-family: 'Consolas'; font-size: 14px; font-weight: 700;
     }
-    QLineEdit:focus { border: 2px solid #f59e0b; background-color: #1e2436; }
-    QLineEdit#KeyOut { color: #34d399; background-color: #0b0d13; }
+    QLineEdit:focus { border: 2px solid #22d3ee; background-color: #1a2436; }
+    QLineEdit#KeyOut { color: #34d399; background-color: #090d16; }
     QPushButton#BtnAmber {
-        background-color: #f59e0b; color: #09090b;
-        border: none; border-radius: 10px; min-height: 44px; font-size: 12px; font-weight: 700;
+        background-color: #f59e0b; color: #060911;
+        border: none; border-radius: 10px; min-height: 44px; font-size: 12px; font-weight: 800;
     }
     QPushButton#BtnAmber:hover { background-color: #fbbf24; }
     QPushButton#BtnSky {
-        background-color: #38bdf8; color: #09090b;
-        border: none; border-radius: 10px; min-height: 44px; font-size: 12px; font-weight: 700;
+        background-color: #22d3ee; color: #060911;
+        border: none; border-radius: 10px; min-height: 44px; font-size: 12px; font-weight: 800;
     }
-    QPushButton#BtnSky:hover { background-color: #7dd3fc; }
+    QPushButton#BtnSky:hover { background-color: #38bdf8; }
     QPushButton#BtnGreen {
-        background-color: #10b981; color: #09090b;
-        border: none; border-radius: 10px; min-height: 44px; font-size: 12px; font-weight: 700;
+        background-color: #10b981; color: #060911;
+        border: none; border-radius: 10px; min-height: 44px; font-size: 12px; font-weight: 800;
     }
     QPushButton#BtnGreen:hover { background-color: #34d399; }
     QPushButton#SecondaryBtn {
-        background-color: #1a1f2e; color: #f8fafc;
-        border: 1px solid #2e364f; border-radius: 10px;
+        background-color: #161e2e; color: #f8fafc;
+        border: 1px solid #283548; border-radius: 10px;
         min-height: 40px; font-size: 12px; font-weight: 600; padding: 0 12px;
     }
-    QPushButton#SecondaryBtn:hover { border: 1px solid #f59e0b; }
+    QPushButton#SecondaryBtn:hover { border: 1px solid #22d3ee; }
     """
 
 
@@ -152,11 +154,13 @@ def create_db_key(ltype: str, hwid: str = "") -> str:
 def run_gui():
     global _CURRENT_THEME
     app = QApplication.instance() or QApplication(sys.argv)
+    app.setWindowIcon(app_icon())
 
     win = QWidget()
     win.setObjectName("Root")
-    win.setWindowTitle("Chess Stealth Pro — KeyGen")
-    win.setFixedSize(460, 280)
+    win.setWindowTitle("CHESS STEALTH — Key Generator")
+    win.setWindowIcon(app_icon())
+    win.setFixedSize(460, 290)
     win.setStyleSheet(_build_qss(_CURRENT_THEME))
 
     layout = QVBoxLayout(win)
@@ -165,10 +169,7 @@ def run_gui():
 
     top = QHBoxLayout()
     top.setSpacing(10)
-    top.addWidget(KnightLogoWidget(36))
-    title = QLabel("KEY GENERATOR")
-    title.setObjectName("Title")
-    top.addWidget(title)
+    top.addWidget(build_brand_header())
     top.addStretch()
 
     theme_btn = QPushButton("Theme")
