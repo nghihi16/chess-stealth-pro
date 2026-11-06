@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="vi" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chess Stealth Pro — Nhận Key 24 Giờ</title>
+  <style>
+    :root[data-theme="dark"] {
+      --bg-page: #09090b;
+      --bg-card: #18181b;
+      --bg-elevated: #27272a;
+      --bg-key: #09090b;
+      --border-subtle: #3f3f46;
+      --border-focus: #f59e0b;
+      --text-primary: #f4f4f5;
+      --text-secondary: #a1a1aa;
+      --accent-amber: #f59e0b;
+      --accent-amber-hover: #d97706;
+      --accent-green: #22c55e;
+      --accent-green-bg: rgba(34, 197, 94, 0.14);
+      --shadow-card: 0 16px 40px rgba(0, 0, 0, 0.65);
+    }
+
+    :root[data-theme="light"] {
+      --bg-page: #f4f4f5;
+      --bg-card: #ffffff;
+      --bg-elevated: #f4f4f5;
+      --bg-key: #f8fafc;
+      --border-subtle: #d4d4d8;
+      --border-focus: #d97706;
+      --text-primary: #18181b;
+      --text-secondary: #52525b;
+      --accent-amber: #d97706;
+      --accent-amber-hover: #b45309;
+      --accent-green: #15803d;
+      --accent-green-bg: rgba(21, 128, 61, 0.12);
+      --shadow-card: 0 12px 32px rgba(24, 24, 27, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      min-height: 100vh;
+      background-color: var(--bg-page);
+      color: var(--text-primary);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px;
+      line-height: 1.5;
+      transition: background-color 0.2s ease, color 0.2s ease;
+    }
+
+    .topbar {
+      width: 100%;
+      max-width: 480px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+      font-size: 16px;
+      color: var(--text-primary);
+      letter-spacing: -0.01em;
+    }
+
+    .brand svg {
+      color: var(--accent-amber);
+    }
+
+    .theme-btn {
+      min-width: 44px;
+      min-height: 44px;
+      border-radius: 8px;
+      border: 1px solid var(--border-subtle);
+      background: var(--bg-card);
+      color: var(--text-primary);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .theme-btn:hover {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.15);
+    }
+
+    .theme-btn:focus-visible {
+      outline: 2px solid var(--border-focus);
+      outline-offset: 2px;
+    }
+
+    .card {
+      width: 100%;
+      max-width: 480px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 16px;
+      padding: 32px 24px;
+      box-shadow: var(--shadow-card);
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--accent-green-bg);
+      color: var(--accent-green);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 12px;
+      border-radius: 999px;
+      margin-bottom: 16px;
+    }
+
+    h1 {
+      font-size: 22px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      letter-spacing: -0.02em;
+    }
+
+    .subtitle {
+      font-size: 14px;
+      color: var(--text-secondary);
+      margin-bottom: 24px;
+    }
+
+    .key-box {
+      background: var(--bg-key);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 16px;
+      text-align: center;
+      margin-bottom: 16px;
+      position: relative;
+    }
+
+    .key-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-secondary);
+      margin-bottom: 8px;
+      display: block;
+    }
+
+    .key-value {
+      font-family: "JetBrains Mono", Consolas, monospace;
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--accent-green);
+      letter-spacing: 0.04em;
+      word-break: break-all;
+      user-select: all;
+    }
+
+    .btn-primary {
+      width: 100%;
+      min-height: 48px;
+      background: var(--accent-amber);
+      color: #18181b;
+      border: none;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: background-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .btn-primary:hover {
+      background: var(--accent-amber-hover);
+      box-shadow: 0 0 16px rgba(245, 158, 11, 0.35);
+    }
+
+    .btn-primary:focus-visible {
+      outline: 2px solid var(--border-focus);
+      outline-offset: 2px;
+    }
+
+    .meta-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border-subtle);
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .timer {
+      font-family: Consolas, monospace;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .steps {
+      margin-top: 24px;
+      background: var(--bg-elevated);
+      border-radius: 12px;
+      padding: 16px;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .steps-title {
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+
+    .steps ol {
+      padding-left: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    @media (max-width: 480px) {
+      .card {
+        padding: 24px 16px;
+      }
+      .key-value {
+        font-size: 17px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"/>
+      </svg>
+      <span>CHESS STEALTH PRO</span>
+    </div>
+    <button id="theme-toggle" class="theme-btn" type="button" aria-label="Chuyển đổi giao diện Sáng/Tối">
+      <svg id="theme-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="5"></circle>
+        <line x1="12" y1="1" x2="12" y2="3"></line>
+        <line x1="12" y1="21" x2="12" y2="23"></line>
+        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+        <line x1="1" y1="12" x2="3" y2="12"></line>
+        <line x1="21" y1="12" x2="23" y2="12"></line>
+        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+      </svg>
+    </button>
+  </header>
+
+  <main class="card">
+    <div class="badge">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polyline points="20 6 9 17 4 12"></polyline>
+      </svg>
+      <span>Xác thực vượt link thành công</span>
+    </div>
+
+    <h1>Mã Key 24 Giờ Của Bạn</h1>
+    <p class="subtitle">Mã kích hoạt dưới đây vừa được khởi tạo tự động và có hiệu lực trong 24 giờ.</p>
+
+    <div class="key-box">
+      <span class="key-label">License Key (24 Hours)</span>
+      <div id="key-display" class="key-value">ĐANG TẠO KEY...</div>
+    </div>
+
+    <button id="copy-btn" class="btn-primary" type="button">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+      </svg>
+      <span id="copy-text">SAO CHÉP MÃ KEY</span>
+    </button>
+
+    <div class="meta-row">
+      <span>Thời hạn còn lại:</span>
+      <span id="countdown" class="timer">23:59:59</span>
+    </div>
+
+    <section class="steps" aria-label="Hướng dẫn kích hoạt">
+      <div class="steps-title">Hướng dẫn kích hoạt nhanh:</div>
+      <ol>
+        <li>Nhấn nút <strong>Sao chép mã Key</strong> phía trên.</li>
+        <li>Mở phần mềm <strong>ChessPro.exe</strong> trên máy tính và dán mã vào ô nhập Key.</li>
+        <li>Chọn trình duyệt bạn đang dùng và nhấn <strong>Bắt đầu</strong>.</li>
+      </ol>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      const STORAGE_KEY = 'csp_daily_key_v1';
+      const keyDisplay = document.getElementById('key-display');
+      const copyBtn = document.getElementById('copy-btn');
+      const copyText = document.getElementById('copy-text');
+      const countdownEl = document.getElementById('countdown');
+      const themeToggle = document.getElementById('theme-toggle');
+
+      // Theme switcher
+      themeToggle.addEventListener('click', () => {
+        const html = document.documentElement;
+        const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+        html.setAttribute('data-theme', next);
+      });
+
+      // Generate HMAC-SHA256 matching main.py (FREE-1D-<EXP_HEX>-<SIG8>)
+      async function createDailyKey() {
+        // Check if a valid key was generated in the last 30 minutes to prevent refresh spam
+        try {
+          const cached = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
+          const nowSec = Math.floor(Date.now() / 1000);
+          if (cached && cached.exp > nowSec + 3600 && cached.key) {
+            return cached;
+          }
+        } catch (_) {}
+
+        const expSec = Math.floor(Date.now() / 1000) + 86400;
+        const expHex = expSec.toString(16).toUpperCase().padStart(8, '0');
+        const enc = new TextEncoder();
+        const secret = atob('Q0hFU1NfU1RFQUxUSF9QUk9fTUFTVEVSX1NFQ1JFVF8yMDI2X1Yx');
+        const cryptoKey = await crypto.subtle.importKey(
+          'raw',
+          enc.encode(secret),
+          { name: 'HMAC', hash: 'SHA-256' },
+          false,
+          ['sign']
+        );
+        const sigBuf = await crypto.subtle.sign('HMAC', cryptoKey, enc.encode('1D:' + expHex));
+        const sigHex = Array.from(new Uint8Array(sigBuf))
+          .map(b => b.toString(16).padStart(2, '0'))
+          .join('')
+          .toUpperCase()
+          .slice(0, 8);
+
+        const fullKey = `FREE-1D-${expHex}-${sigHex}`;
+        const result = { key: fullKey, exp: expSec };
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(result));
+        } catch (_) {}
+        return result;
+      }
+
+      let currentKeyObj = null;
+
+      createDailyKey().then(res => {
+        currentKeyObj = res;
+        keyDisplay.textContent = res.key;
+      });
+
+      copyBtn.addEventListener('click', async () => {
+        if (!currentKeyObj) return;
+        try {
+          await navigator.clipboard.writeText(currentKeyObj.key);
+          copyText.textContent = 'ĐÃ SAO CHÉP VÀO CLIPBOARD';
+          setTimeout(() => {
+            copyText.textContent = 'SAO CHÉP MÃ KEY';
+          }, 2200);
+        } catch (_) {
+          // Fallback selection
+          const range = document.createRange();
+          range.selectNodeContents(keyDisplay);
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+          document.execCommand('copy');
+          copyText.textContent = 'ĐÃ SAO CHÉP VÀO CLIPBOARD';
+        }
+      });
+
+      setInterval(() => {
+        if (!currentKeyObj) return;
+        const rem = Math.max(0, currentKeyObj.exp - Math.floor(Date.now() / 1000));
+        const h = String(Math.floor(rem / 3600)).padStart(2, '0');
+        const m = String(Math.floor((rem % 3600) / 60)).padStart(2, '0');
+        const s = String(rem % 60).padStart(2, '0');
+        countdownEl.textContent = `${h}:${m}:${s}`;
+      }, 1000);
+    })();
+  </script>
+</body>
+</html>

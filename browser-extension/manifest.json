@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Chess Stealth Bridge",
+  "version": "1.0.0",
+  "description": "Zero-DOM bridge for Windows WDA_EXCLUDEFROMCAPTURE stealth overlay.",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "*://*.chess.com/*",
+    "http://127.0.0.1:8765/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.chess.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_end"
+    }
+  ]
+}
