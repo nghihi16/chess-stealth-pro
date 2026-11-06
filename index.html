@@ -205,7 +205,7 @@
 
     .provider-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: repeat(3, 1fr);
       gap: 8px;
       margin-bottom: 24px;
     }
@@ -484,13 +484,19 @@
           <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
           <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
         </svg>
-        <span>Cổng 1: Linkvertise</span>
+        <span>Linkvertise</span>
+      </button>
+      <button id="prov-lootlabs" class="provider-btn" type="button">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+        </svg>
+        <span>LootLabs</span>
       </button>
       <button id="prov-workink" class="provider-btn" type="button">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
         </svg>
-        <span>Cổng 2: Work.ink</span>
+        <span>Work.ink</span>
       </button>
     </div>
 
@@ -595,17 +601,41 @@
       const STEP_STORAGE_KEY = 'csp_checkpoint_progress_v2';
       const SECRET_STR = 'CHESS_STEALTH_PRO_WEB24H_SECRET_2026';
       const LINKVERTISE_USER_ID = '10578379';
+      const LOOTLABS_API_TOKEN = '302dc17ea2f8d2451ca43467aac3accaafc8e40258793bad1b19d074e9eaa6e7';
 
-      // Tạo Dynamic Link của Linkvertise (gắn Publisher ID 10578379) hoặc link cố định
+      // Tạo Dynamic Link của Linkvertise (gắn Publisher ID 10578379)
       function buildLinkvertiseUrl(stepNum) {
         const base = `${window.location.origin}${window.location.pathname}?step=${stepNum}`;
         const rand = Math.floor(Math.random() * 900 + 100);
         return `https://link-to.net/${LINKVERTISE_USER_ID}/${rand}/dynamic?r=${btoa(encodeURI(base))}`;
       }
 
+      // Gọi trực tiếp API LootLabs để tạo link vượt động cho từng Chặng (1 hoặc 2)
+      async function buildLootLabsUrl(stepNum) {
+        const targetUrl = `${window.location.origin}${window.location.pathname}?step=${stepNum}`;
+        const params = new URLSearchParams({
+          api_token: LOOTLABS_API_TOKEN,
+          title: `Chess Stealth Pro Key 24h (Step ${stepNum}/2)`,
+          url: targetUrl,
+          tier_id: '1',
+          number_of_tasks: '3',
+          theme: '1'
+        });
+        const res = await fetch(`https://be.lootlabs.gg/api/lootlabs/content_locker?${params.toString()}`);
+        const data = await res.json();
+        if (data && data.message && Array.isArray(data.message) && data.message[0] && data.message[0].loot_url) {
+          return data.message[0].loot_url;
+        }
+        throw new Error((data && data.message) || 'LootLabs API chưa hoàn tất Creator Details');
+      }
+
       const SHORTENER_LINKS = {
         linkvertise: {
-          step1: null, // Sẽ dùng buildLinkvertiseUrl(1) nếu chưa điền link tĩnh đầy đủ
+          step1: null,
+          step2: null
+        },
+        lootlabs: {
+          step1: null,
           step2: null
         },
         workink: {
@@ -627,6 +657,7 @@
       const stepText1 = document.getElementById('step-text-1');
       const stepText2 = document.getElementById('step-text-2');
       const provLinkvertise = document.getElementById('prov-linkvertise');
+      const provLootlabs = document.getElementById('prov-lootlabs');
       const provWorkink = document.getElementById('prov-workink');
       const goStepBtn = document.getElementById('go-step-btn');
       const goStepText = document.getElementById('go-step-text');
@@ -652,17 +683,16 @@
         html.setAttribute('data-theme', next);
       });
 
-      provLinkvertise.addEventListener('click', () => {
-        selectedProvider = 'linkvertise';
-        provLinkvertise.classList.add('selected');
-        provWorkink.classList.remove('selected');
-      });
+      function setProvider(name) {
+        selectedProvider = name;
+        provLinkvertise.classList.toggle('selected', name === 'linkvertise');
+        provLootlabs.classList.toggle('selected', name === 'lootlabs');
+        provWorkink.classList.toggle('selected', name === 'workink');
+      }
 
-      provWorkink.addEventListener('click', () => {
-        selectedProvider = 'workink';
-        provWorkink.classList.add('selected');
-        provLinkvertise.classList.remove('selected');
-      });
+      provLinkvertise.addEventListener('click', () => setProvider('linkvertise'));
+      provLootlabs.addEventListener('click', () => setProvider('lootlabs'));
+      provWorkink.addEventListener('click', () => setProvider('workink'));
 
       async function hmacHex(message) {
         const enc = new TextEncoder();
@@ -746,7 +776,7 @@
         openAppBtn.href = `chesspro://activate?key=${encodeURIComponent(claim.licenseKey)}`;
       }
 
-      goStepBtn.addEventListener('click', () => {
+      goStepBtn.addEventListener('click', async () => {
         const nowSec = Math.floor(Date.now() / 1000);
         try {
           const prev = JSON.parse(localStorage.getItem(STEP_STORAGE_KEY) || '{}');
@@ -758,7 +788,19 @@
         const provLinks = SHORTENER_LINKS[selectedProvider] || SHORTENER_LINKS.linkvertise;
         let dest = currentTargetStep === 1 ? provLinks.step1 : provLinks.step2;
         if (!dest) {
-          dest = buildLinkvertiseUrl(currentTargetStep);
+          if (selectedProvider === 'lootlabs') {
+            const origText = goStepText.textContent;
+            goStepText.textContent = 'ĐANG TẠO LINK LOOTLABS...';
+            try {
+              dest = await buildLootLabsUrl(currentTargetStep);
+            } catch (_) {
+              dest = buildLinkvertiseUrl(currentTargetStep);
+            } finally {
+              goStepText.textContent = origText;
+            }
+          } else {
+            dest = buildLinkvertiseUrl(currentTargetStep);
+          }
         }
         window.location.href = dest;
       });
