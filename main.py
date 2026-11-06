@@ -585,82 +585,199 @@ def launch_stealth_engine(browser_type: str, active_key: str, hwid: str):
     root.mainloop()
 
 
-# ================= POPUP CHỌN TRÌNH DUYỆT =================
+# ================= BỘ TOKEN GIAO DIỆN UI/UX PRO MAX (DARK & LIGHT) =================
+UI_THEMES = {
+    "dark": {
+        "bg": "#0b0d12",
+        "card": "#131722",
+        "elevated": "#1c2230",
+        "elevated_hover": "#262e40",
+        "border": "#2e3646",
+        "focus": "#f59e0b",
+        "text": "#f8fafc",
+        "subtext": "#cbd5e1",
+        "muted": "#94a3b8",
+        "amber": "#f59e0b",
+        "amber_hover": "#fbbf24",
+        "amber_fg": "#09090b",
+        "green": "#10b981",
+        "green_hover": "#34d399",
+        "green_fg": "#07080a",
+        "sky": "#38bdf8",
+    },
+    "light": {
+        "bg": "#f1f5f9",
+        "card": "#ffffff",
+        "elevated": "#f8fafc",
+        "elevated_hover": "#e2e8f0",
+        "border": "#cbd5e1",
+        "focus": "#d97706",
+        "text": "#0f172a",
+        "subtext": "#334155",
+        "muted": "#475569",
+        "amber": "#d97706",
+        "amber_hover": "#b45309",
+        "amber_fg": "#ffffff",
+        "green": "#059669",
+        "green_hover": "#047857",
+        "green_fg": "#ffffff",
+        "sky": "#0284c7",
+    },
+}
+_CURRENT_THEME = "dark"
+
+
+def _bind_hover(widget, bg_normal: str, bg_hover: str, fg_normal: str = None, fg_hover: str = None):
+    def _on_enter(_):
+        widget.config(bg=bg_hover)
+        if fg_hover:
+            widget.config(fg=fg_hover)
+
+    def _on_leave(_):
+        widget.config(bg=bg_normal)
+        if fg_normal:
+            widget.config(fg=fg_normal)
+
+    widget.bind("<Enter>", _on_enter)
+    widget.bind("<Leave>", _on_leave)
+
+
+# ================= POPUP CHỌN TRÌNH DUYỆT (UI/UX PRO MAX) =================
 def show_browser_selector(license_info: str, active_key: str, hwid: str):
+    global _CURRENT_THEME
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
+        pass
+
     sel_root = tk.Tk()
-    sel_root.title("Chess Stealth Pro - Chon Trinh Duyet")
-    sel_root.geometry("380x270")
-    sel_root.configure(bg="#18181b")
+    sel_root.title("Chess Stealth Pro — Cấu Hình Trình Duyệt")
+    sel_root.geometry("480x420")
     sel_root.resizable(False, False)
     sel_root.eval("tk::PlaceWindow . center")
 
-    tk.Label(
-        sel_root,
-        text="CHỌN TRÌNH DUYỆT SỬ DỤNG",
-        fg="#f59e0b",
-        bg="#18181b",
-        font=("Segoe UI", 12, "bold"),
-    ).pack(pady=(16, 4))
-
-    tk.Label(
-        sel_root,
-        text=f"{license_info}",
-        fg="#22c55e",
-        bg="#18181b",
-        font=("Segoe UI", 9),
-    ).pack(pady=(0, 10))
-
     browser_var = tk.StringVar(value="min")
+    container = tk.Frame(sel_root)
+    container.pack(fill="both", expand=True)
 
-    options_frame = tk.Frame(sel_root, bg="#27272a", padx=16, pady=10)
-    options_frame.pack(fill="x", padx=24)
+    def build_selector_ui():
+        for w in container.winfo_children():
+            w.destroy()
+        t = UI_THEMES[_CURRENT_THEME]
+        sel_root.configure(bg=t["bg"])
+        container.configure(bg=t["bg"], padx=24, pady=16)
 
-    browsers = [
-        ("Min Browser (Tự động cài & mở)", "min"),
-        ("Brave Browser (Tự động nạp & mở)", "brave"),
-        ("Google Chrome (Tự động nạp & mở)", "chrome"),
-        ("Chỉ bật Overlay (Đã mở sẵn trình duyệt)", "other"),
-    ]
+        top = tk.Frame(container, bg=t["bg"])
+        top.pack(fill="x", pady=(0, 12))
 
-    for label_text, val in browsers:
-        tk.Radiobutton(
-            options_frame,
-            text=label_text,
-            variable=browser_var,
-            value=val,
-            fg="#f4f4f5",
-            bg="#27272a",
-            selectcolor="#18181b",
-            activebackground="#27272a",
-            activeforeground="#f59e0b",
-            font=("Segoe UI", 9),
-        ).pack(anchor="w", pady=2)
+        title_lbl = tk.Label(
+            top,
+            text="CHỌN TRÌNH DUYỆT KHỞI CHẠY",
+            fg=t["text"],
+            bg=t["bg"],
+            font=("Segoe UI", 13, "bold"),
+        )
+        title_lbl.pack(side="left")
 
-    def start_app():
-        chosen = browser_var.get()
-        sel_root.destroy()
-        launch_stealth_engine(chosen, active_key, hwid)
+        def toggle_theme():
+            global _CURRENT_THEME
+            _CURRENT_THEME = "light" if _CURRENT_THEME == "dark" else "dark"
+            build_selector_ui()
 
-    tk.Button(
-        sel_root,
-        text="BẮT ĐẦU (ALT+X: ẨN/HIỆN | ALT+Q: THOÁT)",
-        command=start_app,
-        bg="#f59e0b",
-        fg="#18181b",
-        activebackground="#d97706",
-        activeforeground="#18181b",
-        font=("Segoe UI", 9, "bold"),
-        width=38,
-        relief="flat",
-        cursor="hand2",
-        pady=7,
-    ).pack(pady=14)
+        theme_btn = tk.Button(
+            top,
+            text="Sáng / Tối",
+            command=toggle_theme,
+            bg=t["elevated"],
+            fg=t["subtext"],
+            font=("Segoe UI", 8, "bold"),
+            relief="flat",
+            bd=0,
+            padx=10,
+            pady=6,
+            cursor="hand2",
+        )
+        theme_btn.pack(side="right")
+        _bind_hover(theme_btn, t["elevated"], t["elevated_hover"])
 
+        badge = tk.Label(
+            container,
+            text=f"Bản quyền đã xác thực: {license_info}",
+            fg=t["green"],
+            bg=t["card"],
+            font=("Segoe UI", 9, "bold"),
+            padx=12,
+            pady=6,
+        )
+        badge.pack(fill="x", pady=(0, 12))
+
+        card = tk.Frame(
+            container,
+            bg=t["card"],
+            highlightbackground=t["border"],
+            highlightthickness=1,
+            padx=16,
+            pady=12,
+        )
+        card.pack(fill="x", pady=(0, 16))
+
+        browsers = [
+            ("Min Browser (Tự động nạp Stealth Bridge & mở)", "min"),
+            ("Brave Browser (Tự động nạp Extension & mở)", "brave"),
+            ("Google Chrome (Tự động nạp Extension & mở)", "chrome"),
+            ("Chỉ bật Overlay (Đã mở sẵn trình duyệt ngoài)", "other"),
+        ]
+
+        for label_text, val in browsers:
+            rb = tk.Radiobutton(
+                card,
+                text=label_text,
+                variable=browser_var,
+                value=val,
+                fg=t["text"],
+                bg=t["card"],
+                selectcolor=t["elevated"],
+                activebackground=t["card"],
+                activeforeground=t["amber"],
+                font=("Segoe UI", 9, "bold" if browser_var.get() == val else "normal"),
+                pady=6,
+                cursor="hand2",
+            )
+            rb.pack(anchor="w", fill="x")
+
+        def start_app():
+            chosen = browser_var.get()
+            sel_root.destroy()
+            launch_stealth_engine(chosen, active_key, hwid)
+
+        start_btn = tk.Button(
+            container,
+            text="KHỞI ĐỘNG HỆ THỐNG (ALT+X: ẨN/HIỆN | ALT+Q: THOÁT)",
+            command=start_app,
+            bg=t["amber"],
+            fg=t["amber_fg"],
+            activebackground=t["amber_hover"],
+            activeforeground=t["amber_fg"],
+            font=("Segoe UI", 10, "bold"),
+            relief="flat",
+            cursor="hand2",
+            pady=11,
+        )
+        start_btn.pack(fill="x")
+        _bind_hover(start_btn, t["amber"], t["amber_hover"])
+
+    build_selector_ui()
     sel_root.mainloop()
 
 
-# ================= POPUP BẮT BUỘC NHẬP KEY KHI MỞ .EXE =================
+# ================= POPUP BẮT BUỘC NHẬP KEY KHI MỞ .EXE (UI/UX PRO MAX) =================
 def main():
+    global _CURRENT_THEME
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
+        pass
+
     register_custom_url_scheme("chesspro")
     start_background_api_server("127.0.0.1", 8766)
 
@@ -676,75 +793,17 @@ def main():
             pass
 
     root = tk.Tk()
-    root.title("Chess Stealth Pro - Kich Hoat Key")
-    root.geometry("410x280")
-    root.configure(bg="#18181b")
+    root.title("Chess Stealth Pro — Xác Thực Bản Quyền")
+    root.geometry("480x380")
     root.resizable(False, False)
     root.eval("tk::PlaceWindow . center")
 
-    tk.Label(
-        root,
-        text="CHESS STEALTH PRO (Ed25519 Verified)",
-        fg="#f59e0b",
-        bg="#18181b",
-        font=("Segoe UI", 12, "bold"),
-    ).pack(pady=(16, 4))
-
-    hwid_frame = tk.Frame(root, bg="#18181b")
-    hwid_frame.pack(pady=(0, 8))
-
-    tk.Label(
-        hwid_frame,
-        text=f"HWID: {hwid}",
-        fg="#a1a1aa",
-        bg="#18181b",
-        font=("Consolas", 9),
-    ).pack(side="left", padx=(0, 6))
-
-    def copy_hwid():
-        root.clipboard_clear()
-        root.clipboard_append(hwid)
-        copy_btn.config(text="Đã chép", fg="#22c55e")
-
-    copy_btn = tk.Button(
-        hwid_frame,
-        text="Copy HWID",
-        command=copy_hwid,
-        bg="#27272a",
-        fg="#e4e4e7",
-        font=("Segoe UI", 8),
-        relief="flat",
-        padx=6,
-        pady=1,
-        cursor="hand2",
-    )
-    copy_btn.pack(side="left")
-
-    tk.Label(
-        root,
-        text="Nhập License Key (24h / 30 Ngày / Lifetime):",
-        fg="#e4e4e7",
-        bg="#18181b",
-        font=("Segoe UI", 9),
-    ).pack()
-
-    key_entry = tk.Entry(
-        root,
-        width=32,
-        font=("Consolas", 11, "bold"),
-        bg="#27272a",
-        fg="#ffffff",
-        insertbackground="#ffffff",
-        relief="flat",
-        justify="center",
-    )
-    key_entry.pack(pady=8, ipady=6)
-    if saved_key:
-        key_entry.insert(0, saved_key)
-    key_entry.focus_set()
+    key_var = tk.StringVar(value=saved_key)
+    shell = tk.Frame(root)
+    shell.pack(fill="both", expand=True)
 
     def handle_activate(event=None):
-        k = key_entry.get().strip()
+        k = key_var.get().strip()
         if not k:
             messagebox.showwarning("Thiếu Key", "Vui lòng nhập mã License Key!")
             return
@@ -763,54 +822,204 @@ def main():
 
     root.bind("<Return>", handle_activate)
 
-    tk.Button(
-        root,
-        text="XÁC NHẬN & TIẾP TỤC",
-        command=handle_activate,
-        bg="#22c55e",
-        fg="#ffffff",
-        activebackground="#16a34a",
-        activeforeground="#ffffff",
-        font=("Segoe UI", 10, "bold"),
-        width=32,
-        relief="flat",
-        cursor="hand2",
-        pady=6,
-    ).pack(pady=(4, 10))
+    def render_main_ui():
+        for w in shell.winfo_children():
+            w.destroy()
+        t = UI_THEMES[_CURRENT_THEME]
+        root.configure(bg=t["bg"])
+        shell.configure(bg=t["bg"], padx=24, pady=16)
 
-    sub_frame = tk.Frame(root, bg="#18181b")
-    sub_frame.pack(pady=2)
+        # Header Bar (8dp rhythm)
+        header = tk.Frame(shell, bg=t["bg"])
+        header.pack(fill="x", pady=(0, 12))
 
-    def open_dynamic_get_key():
-        os.startfile(WEB_GET_KEY_URL)
+        brand_frame = tk.Frame(header, bg=t["bg"])
+        brand_frame.pack(side="left")
 
-    tk.Button(
-        sub_frame,
-        text="Lấy Key 24h (Vượt Link)",
-        command=open_dynamic_get_key,
-        bg="#27272a",
-        fg="#f59e0b",
-        font=("Segoe UI", 9),
-        width=18,
-        relief="flat",
-        cursor="hand2",
-        pady=4,
-    ).grid(row=0, column=0, padx=4)
+        # Vector Shield Canvas Icon (No Emoji)
+        icon_cv = tk.Canvas(
+            brand_frame, width=28, height=28, bg=t["bg"], highlightthickness=0
+        )
+        icon_cv.pack(side="left", padx=(0, 8))
+        icon_cv.create_polygon(
+            14, 3, 24, 7, 24, 15, 14, 25, 4, 15, 4, 7,
+            fill=t["card"], outline=t["amber"], width=2
+        )
 
-    tk.Button(
-        sub_frame,
-        text="Mua 30 Ngày / Lifetime",
-        command=lambda: os.startfile(BUY_LIFE_URL),
-        bg="#27272a",
-        fg="#38bdf8",
-        font=("Segoe UI", 9),
-        width=18,
-        relief="flat",
-        cursor="hand2",
-        pady=4,
-    ).grid(row=0, column=1, padx=4)
+        title_box = tk.Frame(brand_frame, bg=t["bg"])
+        title_box.pack(side="left")
+        tk.Label(
+            title_box,
+            text="CHESS STEALTH PRO",
+            fg=t["text"],
+            bg=t["bg"],
+            font=("Segoe UI", 12, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            title_box,
+            text="SUPABASE CLOUD  •  ED25519 VERIFIED",
+            fg=t["amber"],
+            bg=t["bg"],
+            font=("Segoe UI", 7, "bold"),
+        ).pack(anchor="w")
 
-    # Nếu được gọi tự động từ trình duyệt qua `chesspro://activate?key=XXX`, tự kích hoạt ngay
+        def toggle_theme():
+            global _CURRENT_THEME
+            _CURRENT_THEME = "light" if _CURRENT_THEME == "dark" else "dark"
+            render_main_ui()
+
+        theme_btn = tk.Button(
+            header,
+            text="Sáng / Tối",
+            command=toggle_theme,
+            bg=t["elevated"],
+            fg=t["subtext"],
+            font=("Segoe UI", 8, "bold"),
+            relief="flat",
+            padx=10,
+            pady=6,
+            cursor="hand2",
+        )
+        theme_btn.pack(side="right")
+        _bind_hover(theme_btn, t["elevated"], t["elevated_hover"])
+
+        # Main Card Surface
+        card = tk.Frame(
+            shell,
+            bg=t["card"],
+            highlightbackground=t["border"],
+            highlightthickness=1,
+            padx=20,
+            pady=16,
+        )
+        card.pack(fill="x", pady=(0, 12))
+
+        # HWID Row
+        hwid_row = tk.Frame(card, bg=t["card"])
+        hwid_row.pack(fill="x", pady=(0, 12))
+
+        tk.Label(
+            hwid_row,
+            text=f"HWID: {hwid}",
+            fg=t["muted"],
+            bg=t["card"],
+            font=("Consolas", 9, "bold"),
+        ).pack(side="left")
+
+        def copy_hwid():
+            root.clipboard_clear()
+            root.clipboard_append(hwid)
+            copy_btn.config(text="Đã chép HWID", fg=t["green"])
+
+        copy_btn = tk.Button(
+            hwid_row,
+            text="Sao chép HWID",
+            command=copy_hwid,
+            bg=t["elevated"],
+            fg=t["subtext"],
+            font=("Segoe UI", 8, "bold"),
+            relief="flat",
+            padx=10,
+            pady=4,
+            cursor="hand2",
+        )
+        copy_btn.pack(side="right")
+        _bind_hover(copy_btn, t["elevated"], t["elevated_hover"])
+
+        tk.Label(
+            card,
+            text="Nhập Mã Bản Quyền (24 Giờ / 30 Ngày / Vĩnh Viễn):",
+            fg=t["subtext"],
+            bg=t["card"],
+            font=("Segoe UI", 9, "bold"),
+        ).pack(anchor="w", pady=(0, 6))
+
+        entry_border = tk.Frame(
+            card,
+            bg=t["elevated"],
+            highlightbackground=t["border"],
+            highlightthickness=1,
+            padx=2,
+            pady=2,
+        )
+        entry_border.pack(fill="x", pady=(0, 16))
+
+        key_entry = tk.Entry(
+            entry_border,
+            textvariable=key_var,
+            font=("Consolas", 12, "bold"),
+            bg=t["elevated"],
+            fg=t["text"],
+            insertbackground=t["text"],
+            relief="flat",
+            justify="center",
+        )
+        key_entry.pack(fill="x", ipady=8)
+        key_entry.focus_set()
+
+        key_entry.bind(
+            "<FocusIn>", lambda _: entry_border.config(highlightbackground=t["focus"])
+        )
+        key_entry.bind(
+            "<FocusOut>", lambda _: entry_border.config(highlightbackground=t["border"])
+        )
+
+        # Primary CTA (>= 44px height)
+        act_btn = tk.Button(
+            card,
+            text="XÁC NHẬN & KÍCH HOẠT NGAY",
+            command=handle_activate,
+            bg=t["green"],
+            fg=t["green_fg"],
+            activebackground=t["green_hover"],
+            activeforeground=t["green_fg"],
+            font=("Segoe UI", 10, "bold"),
+            relief="flat",
+            cursor="hand2",
+            pady=10,
+        )
+        act_btn.pack(fill="x")
+        _bind_hover(act_btn, t["green"], t["green_hover"])
+
+        # Bottom Secondary Actions Grid (8dp gap)
+        sub_frame = tk.Frame(shell, bg=t["bg"])
+        sub_frame.pack(fill="x")
+        sub_frame.columnconfigure(0, weight=1)
+        sub_frame.columnconfigure(1, weight=1)
+
+        def open_dynamic_get_key():
+            os.startfile(WEB_GET_KEY_URL)
+
+        free_btn = tk.Button(
+            sub_frame,
+            text="Lấy Key 24h (Vượt Link)",
+            command=open_dynamic_get_key,
+            bg=t["elevated"],
+            fg=t["amber"],
+            font=("Segoe UI", 9, "bold"),
+            relief="flat",
+            cursor="hand2",
+            pady=9,
+        )
+        free_btn.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        _bind_hover(free_btn, t["elevated"], t["elevated_hover"])
+
+        buy_btn = tk.Button(
+            sub_frame,
+            text="Mua Key 30 Ngày / VIP",
+            command=lambda: os.startfile(BUY_LIFE_URL),
+            bg=t["elevated"],
+            fg=t["sky"],
+            font=("Segoe UI", 9, "bold"),
+            relief="flat",
+            cursor="hand2",
+            pady=9,
+        )
+        buy_btn.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        _bind_hover(buy_btn, t["elevated"], t["elevated_hover"])
+
+    render_main_ui()
+
     if url_scheme_key:
         root.after(250, handle_activate)
 
