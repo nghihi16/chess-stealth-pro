@@ -3,21 +3,20 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Chess Stealth Pro — Cổng Nhận Key 24 Giờ (2 Checkpoints)</title>
+  <title>Chess Stealth Pro — Get Key</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@600;700&family=Plus+Jakarta+Sans:wght@500;600;700&family=Space+Grotesk:wght@700&display=swap" rel="stylesheet" />
   <style>
     :root[data-theme="dark"] {
-      --bg-page: #07080a;
-      --bg-glow-1: rgba(245, 158, 11, 0.11);
+      --bg-page: #07080c;
+      --bg-glow-1: rgba(245, 158, 11, 0.12);
       --bg-glow-2: rgba(16, 185, 129, 0.08);
-      --bg-card: rgba(18, 20, 26, 0.86);
-      --bg-elevated: rgba(29, 32, 42, 0.85);
-      --bg-elevated-hover: rgba(39, 43, 56, 0.95);
-      --bg-key: #0b0d12;
-      --border-subtle: rgba(255, 255, 255, 0.11);
-      --border-strong: rgba(255, 255, 255, 0.2);
+      --bg-card: rgba(17, 19, 26, 0.88);
+      --bg-elevated: rgba(28, 32, 43, 0.9);
+      --bg-elevated-hover: rgba(38, 43, 58, 1);
+      --bg-key: #0b0d13;
+      --border-subtle: rgba(255, 255, 255, 0.1);
       --border-focus: #f59e0b;
       --text-primary: #f8fafc;
       --text-secondary: #cbd5e1;
@@ -30,8 +29,8 @@
       --accent-green-soft: rgba(52, 211, 153, 0.14);
       --accent-red: #f87171;
       --accent-red-soft: rgba(248, 113, 113, 0.14);
-      --shadow-card: 0 24px 48px -12px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.05);
-      --shadow-glow-amber: 0 0 24px rgba(245, 158, 11, 0.38);
+      --shadow-card: 0 24px 48px -12px rgba(0, 0, 0, 0.78);
+      --shadow-glow-amber: 0 0 24px rgba(245, 158, 11, 0.36);
       --shadow-glow-subtle: 0 0 16px rgba(245, 158, 11, 0.18);
     }
 
@@ -39,13 +38,12 @@
       --bg-page: #f1f5f9;
       --bg-glow-1: rgba(217, 119, 6, 0.08);
       --bg-glow-2: rgba(5, 150, 105, 0.06);
-      --bg-card: rgba(255, 255, 255, 0.92);
+      --bg-card: rgba(255, 255, 255, 0.94);
       --bg-elevated: #f8fafc;
       --bg-elevated-hover: #eef2f6;
       --bg-key: #f8fafc;
       --border-subtle: #cbd5e1;
-      --border-strong: #94a3b8;
-      --border-focus: #b45309;
+      --border-focus: #d97706;
       --text-primary: #0f172a;
       --text-secondary: #334155;
       --text-muted: #475569;
@@ -57,7 +55,7 @@
       --accent-green-soft: rgba(4, 120, 87, 0.11);
       --accent-red: #b91c1c;
       --accent-red-soft: rgba(185, 28, 28, 0.1);
-      --shadow-card: 0 20px 40px -15px rgba(15, 23, 42, 0.1), 0 0 0 1px rgba(15, 23, 42, 0.04);
+      --shadow-card: 0 20px 40px -15px rgba(15, 23, 42, 0.1);
       --shadow-glow-amber: 0 8px 24px rgba(217, 119, 6, 0.28);
       --shadow-glow-subtle: 0 4px 14px rgba(217, 119, 6, 0.15);
     }
@@ -72,12 +70,11 @@
       min-height: 100vh;
       background-color: var(--bg-page);
       background-image:
-        radial-gradient(circle at 15% 15%, var(--bg-glow-1), transparent 42%),
-        radial-gradient(circle at 85% 85%, var(--bg-glow-2), transparent 42%);
+        radial-gradient(circle at 18% 18%, var(--bg-glow-1), transparent 40%),
+        radial-gradient(circle at 82% 82%, var(--bg-glow-2), transparent 40%);
       color: var(--text-primary);
       font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       display: flex;
-      flex-direction: column;
       align-items: center;
       justify-content: center;
       padding: 24px 16px;
@@ -85,10 +82,9 @@
       transition: background-color 0.2s ease, color 0.2s ease;
     }
 
-    /* 8dp Rhythm Shell */
     .shell {
       width: 100%;
-      max-width: 540px;
+      max-width: 480px;
       display: flex;
       flex-direction: column;
       gap: 16px;
@@ -99,7 +95,7 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 8px 16px;
+      padding: 10px 16px;
       background: var(--bg-card);
       backdrop-filter: blur(16px);
       -webkit-backdrop-filter: blur(16px);
@@ -119,12 +115,12 @@
       letter-spacing: -0.02em;
     }
 
-    .brand-icon {
-      width: 36px;
-      height: 36px;
+    .brand-logo {
+      width: 38px;
+      height: 38px;
       border-radius: 10px;
-      background: var(--accent-amber-soft);
-      border: 1px solid rgba(245, 158, 11, 0.3);
+      background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(245, 158, 11, 0.05));
+      border: 1px solid rgba(245, 158, 11, 0.35);
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -132,33 +128,13 @@
       flex-shrink: 0;
     }
 
-    .brand-meta {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-    }
-
-    .brand-sub {
-      font-family: "Plus Jakarta Sans", sans-serif;
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--text-muted);
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-    }
-
     .theme-btn {
-      min-width: 44px;
-      min-height: 44px;
-      padding: 0 12px;
-      gap: 8px;
+      width: 44px;
+      height: 44px;
       border-radius: 10px;
       border: 1px solid var(--border-subtle);
       background: var(--bg-elevated);
       color: var(--text-primary);
-      font-family: inherit;
-      font-size: 12px;
-      font-weight: 600;
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -184,78 +160,24 @@
       -webkit-backdrop-filter: blur(20px);
       border: 1px solid var(--border-subtle);
       border-radius: 20px;
-      padding: 32px 24px;
+      padding: 24px;
       box-shadow: var(--shadow-card);
-    }
-
-    .badge-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin-bottom: 16px;
-    }
-
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      background: var(--accent-green-soft);
-      color: var(--accent-green);
-      border: 1px solid rgba(52, 211, 153, 0.25);
-      font-size: 12px;
-      font-weight: 700;
-      padding: 6px 12px;
-      border-radius: 999px;
-      letter-spacing: 0.02em;
-    }
-
-    .badge.badge-amber {
-      background: var(--accent-amber-soft);
-      color: var(--accent-amber);
-      border-color: rgba(245, 158, 11, 0.28);
-    }
-
-    .badge.badge-error {
-      background: var(--accent-red-soft);
-      color: var(--accent-red);
-      border-color: rgba(248, 113, 113, 0.28);
-    }
-
-    .security-pill {
-      font-family: "JetBrains Mono", monospace;
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--text-muted);
-      padding: 4px 10px;
-      border-radius: 999px;
-      background: var(--bg-elevated);
-      border: 1px solid var(--border-subtle);
     }
 
     h1 {
       font-family: "Space Grotesk", sans-serif;
-      font-size: 24px;
+      font-size: 22px;
       font-weight: 700;
-      line-height: 1.2;
-      margin-bottom: 8px;
-      letter-spacing: -0.03em;
+      margin-bottom: 16px;
+      letter-spacing: -0.02em;
       color: var(--text-primary);
     }
 
-    .subtitle {
-      font-size: 14px;
-      color: var(--text-secondary);
-      margin-bottom: 24px;
-      line-height: 1.6;
-    }
-
-    /* Tiến trình 2 Chặng chuẩn 8dp */
+    /* Thanh Tiến Trình 2 Chặng Gọn Hiện Đại */
     .stepper {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 12px;
+      gap: 8px;
       margin-bottom: 24px;
     }
 
@@ -263,10 +185,10 @@
       background: var(--bg-elevated);
       border: 1px solid var(--border-subtle);
       border-radius: 12px;
-      padding: 12px 16px;
+      padding: 12px;
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
       transition: border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
     }
 
@@ -286,23 +208,9 @@
       flex-shrink: 0;
     }
 
-    .step-info {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-    }
-
-    .step-label {
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--text-muted);
-    }
-
     .step-state {
       font-size: 13px;
-      font-weight: 600;
+      font-weight: 700;
       color: var(--text-secondary);
     }
 
@@ -336,37 +244,26 @@
       color: var(--accent-green);
     }
 
-    /* Bộ chọn Cổng Vượt Link */
-    .section-label {
-      font-size: 12px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--text-muted);
-      margin-bottom: 8px;
-      display: block;
-    }
-
+    /* Lưới 4 Cổng Vượt Link Kèm Logo Từng Web */
     .provider-grid {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
-      gap: 8px;
+      gap: 10px;
       margin-bottom: 24px;
     }
 
     .provider-btn {
-      min-height: 64px;
-      border-radius: 12px;
+      min-height: 60px;
+      border-radius: 14px;
       border: 1px solid var(--border-subtle);
       background: var(--bg-elevated);
       color: var(--text-primary);
       font-family: inherit;
       cursor: pointer;
       display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      justify-content: space-between;
-      padding: 12px;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
       text-align: left;
       transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
     }
@@ -388,55 +285,54 @@
       outline-offset: 2px;
     }
 
-    .prov-top {
-      width: 100%;
-      display: flex;
+    .prov-logo {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      display: inline-flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 4px;
-      margin-bottom: 6px;
+      justify-content: center;
+      flex-shrink: 0;
     }
 
-    .prov-top svg {
-      color: var(--accent-amber);
+    .logo-link4m {
+      background: rgba(56, 189, 248, 0.16);
+      color: #38bdf8;
+      border: 1px solid rgba(56, 189, 248, 0.3);
     }
 
-    .prov-tag {
-      font-size: 10px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      padding: 2px 6px;
-      border-radius: 4px;
-      background: var(--bg-key);
-      color: var(--text-secondary);
-      border: 1px solid var(--border-subtle);
+    .logo-shrinkme {
+      background: rgba(168, 85, 247, 0.16);
+      color: #c084fc;
+      border: 1px solid rgba(168, 85, 247, 0.3);
+    }
+
+    .logo-lootlabs {
+      background: rgba(250, 204, 21, 0.16);
+      color: #facc15;
+      border: 1px solid rgba(250, 204, 21, 0.3);
+    }
+
+    .logo-linkvertise {
+      background: rgba(249, 115, 22, 0.16);
+      color: #fb923c;
+      border: 1px solid rgba(249, 115, 22, 0.3);
     }
 
     .prov-name {
-      font-size: 13px;
+      font-size: 14px;
       font-weight: 700;
       color: var(--text-primary);
     }
 
-    /* Hộp Hiển Thị Key */
+    /* Hộp Key */
     .key-box {
       background: var(--bg-key);
-      border: 1px solid var(--border-strong);
+      border: 1px solid var(--border-subtle);
       border-radius: 14px;
       padding: 20px 16px;
       text-align: center;
       margin-bottom: 16px;
-    }
-
-    .key-label {
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--text-muted);
-      margin-bottom: 8px;
-      display: block;
-      font-weight: 700;
     }
 
     .key-value {
@@ -447,32 +343,6 @@
       letter-spacing: 0.04em;
       word-break: break-all;
       user-select: all;
-      min-height: 30px;
-    }
-
-    .url-lock-bar {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      background: var(--bg-elevated);
-      border: 1px solid var(--border-subtle);
-      border-radius: 10px;
-      padding: 10px 12px;
-      margin-bottom: 16px;
-      font-size: 12px;
-      color: var(--text-secondary);
-    }
-
-    .url-lock-bar svg {
-      color: var(--accent-amber);
-      flex-shrink: 0;
-    }
-
-    .url-lock-text {
-      font-family: "JetBrains Mono", Consolas, monospace;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
     }
 
     .actions-stack {
@@ -498,7 +368,7 @@
       justify-content: center;
       gap: 8px;
       text-decoration: none;
-      transition: background-color 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+      transition: background-color 0.15s ease, box-shadow 0.15s ease;
     }
 
     .btn-primary:hover {
@@ -558,70 +428,22 @@
       font-weight: 700;
       font-size: 14px;
       color: var(--text-primary);
-      background: var(--bg-elevated);
-      padding: 4px 10px;
-      border-radius: 8px;
-      border: 1px solid var(--border-subtle);
     }
 
-    .steps {
-      margin-top: 24px;
-      background: var(--bg-elevated);
-      border: 1px solid var(--border-subtle);
-      border-radius: 14px;
-      padding: 16px;
-      font-size: 13px;
+    .error-msg {
+      font-size: 14px;
       color: var(--text-secondary);
-    }
-
-    .steps-title {
-      font-weight: 700;
-      color: var(--text-primary);
-      margin-bottom: 8px;
-      font-size: 13px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .steps-title svg {
-      color: var(--accent-amber);
-    }
-
-    .steps ol {
-      padding-left: 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
+      margin-bottom: 20px;
     }
 
     .hidden {
       display: none !important;
     }
 
-    @media (max-width: 620px) {
-      body {
-        padding: 16px 12px;
-      }
-      .card {
-        padding: 24px 16px;
-      }
-      .key-value {
-        font-size: 17px;
-      }
-      .stepper,
-      .provider-grid {
+    @media (max-width: 480px) {
+      .provider-grid,
+      .stepper {
         grid-template-columns: 1fr;
-      }
-      .provider-btn {
-        min-height: 52px;
-        flex-direction: row;
-        align-items: center;
-      }
-      .prov-top {
-        width: auto;
-        margin-bottom: 0;
-        gap: 8px;
       }
     }
   </style>
@@ -630,17 +452,17 @@
   <div class="shell">
     <header class="topbar">
       <div class="brand">
-        <div class="brand-icon" aria-hidden="true">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        <!-- Logo Quân Mã Chess Stealth Pro (Vector SVG thiết kế riêng) -->
+        <div class="brand-logo" aria-hidden="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 22H5v-2h14v2z"/>
+            <path d="M17 18H7l1-6-3-2 2-5 4 1 3-3 3 4c1 2 1 5 0 11z"/>
+            <circle cx="11.5" cy="8.5" r="1" fill="currentColor"/>
           </svg>
         </div>
-        <div class="brand-meta">
-          <span>CHESS STEALTH PRO</span>
-          <span class="brand-sub">Supabase Cloud &bull; Ed25519</span>
-        </div>
+        <span>CHESS STEALTH PRO</span>
       </div>
-      <button id="theme-toggle" class="theme-btn" type="button" aria-label="Chuyển đổi chế độ Sáng và Tối">
+      <button id="theme-toggle" class="theme-btn" type="button" aria-label="Đổi giao diện Sáng / Tối">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <circle cx="12" cy="12" r="5"></circle>
           <line x1="12" y1="1" x2="12" y2="3"></line>
@@ -652,128 +474,86 @@
           <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
           <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
         </svg>
-        <span id="theme-label">Sáng / Tối</span>
       </button>
     </header>
 
-    <!-- GIAO DIỆN 1: VƯỢT LINK 2 CHẶNG -->
+    <!-- MÀN HÌNH 1: CHỌN CỔNG & VƯỢT 2 CHẶNG -->
     <main id="checkpoint-view" class="card hidden">
-      <div class="badge-row">
-        <div class="badge badge-amber">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="10"></circle>
-            <polyline points="12 6 12 12 16 14"></polyline>
-          </svg>
-          <span id="cp-badge-text">XÁC THỰC 2 CHẶNG (0 / 2)</span>
-        </div>
-        <span class="security-pill">HWID LOCK READY</span>
-      </div>
+      <h1 id="cp-title">Nhận Key 24 Giờ</h1>
 
-      <h1 id="cp-title">Mở Khóa Mã Bản Quyền 24 Giờ</h1>
-      <p id="cp-desc" class="subtitle">
-        Hoàn thành 2 chặng ngắn bên dưới để hệ thống tự động sinh mã Key 24h gắn riêng với đường dẫn của bạn.
-      </p>
-
-      <div class="stepper" aria-label="Tiến trình vượt link 2 chặng">
+      <div class="stepper" aria-label="Tiến trình 2 chặng">
         <div id="step-box-1" class="step-item active">
-          <span class="step-num">01</span>
-          <div class="step-info">
-            <span class="step-label">Chặng 1 / 2</span>
-            <span id="step-text-1" class="step-state">Đang chờ vượt</span>
-          </div>
+          <span class="step-num">1</span>
+          <span id="step-text-1" class="step-state">Chặng 1</span>
         </div>
         <div id="step-box-2" class="step-item">
-          <span class="step-num">02</span>
-          <div class="step-info">
-            <span class="step-label">Chặng 2 / 2</span>
-            <span id="step-text-2" class="step-state">Nhận Key 24h</span>
-          </div>
+          <span class="step-num">2</span>
+          <span id="step-text-2" class="step-state">Chặng 2</span>
         </div>
       </div>
 
-      <span class="section-label">Chọn Cổng Vượt Link Ưu Tiên:</span>
-      <div class="provider-grid" role="group" aria-label="Chọn nhà cung cấp vượt link">
+      <div class="provider-grid" role="group" aria-label="Chọn cổng vượt link">
+        <!-- 1. LINK4M -->
         <button id="prov-link4m" class="provider-btn selected" type="button">
-          <div class="prov-top">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          <div class="prov-logo logo-link4m" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 2L11 13"/>
+              <path d="M22 2L15 22L11 13L2 9L22 2Z"/>
             </svg>
-            <span class="prov-tag">Việt Nam</span>
           </div>
-          <span class="prov-name">Link4m.com</span>
+          <span class="prov-name">Link4m</span>
         </button>
 
+        <!-- 2. SHRINKME.IO -->
         <button id="prov-shrinkme" class="provider-btn" type="button">
-          <div class="prov-top">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+          <div class="prov-logo logo-shrinkme" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/>
+              <path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/>
             </svg>
-            <span class="prov-tag">Ổn định</span>
           </div>
-          <span class="prov-name">ShrinkMe.io</span>
+          <span class="prov-name">ShrinkMe</span>
         </button>
 
+        <!-- 3. LOOTLABS -->
         <button id="prov-lootlabs" class="provider-btn" type="button">
-          <div class="prov-top">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+          <div class="prov-logo logo-lootlabs" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+              <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+              <line x1="12" y1="22.08" x2="12" y2="12"/>
             </svg>
-            <span class="prov-tag">Gaming</span>
           </div>
           <span class="prov-name">LootLabs</span>
         </button>
 
+        <!-- 4. LINKVERTISE -->
         <button id="prov-linkvertise" class="provider-btn" type="button">
-          <div class="prov-top">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
-              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+          <div class="prov-logo logo-linkvertise" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 17L10 11L14 15L20 9"/>
+              <polyline points="15 9 20 9 20 14"/>
             </svg>
-            <span class="prov-tag">Quốc tế</span>
           </div>
           <span class="prov-name">Linkvertise</span>
         </button>
       </div>
 
-      <div class="actions-stack">
-        <button id="go-step-btn" class="btn-primary" type="button">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <line x1="5" y1="12" x2="19" y2="12"></line>
-            <polyline points="12 5 19 12 12 19"></polyline>
-          </svg>
-          <span id="go-step-text">BẮT ĐẦU VƯỢT CHẶNG 1 (1/2)</span>
-        </button>
-      </div>
+      <button id="go-step-btn" class="btn-primary" type="button">
+        <span id="go-step-text">TIẾP TỤC (1 / 2)</span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+          <polyline points="12 5 19 12 12 19"></polyline>
+        </svg>
+      </button>
     </main>
 
-    <!-- GIAO DIỆN 2: HIỂN THỊ KEY 24H DUY NHẤT -->
+    <!-- MÀN HÌNH 2: HIỂN THỊ KEY -->
     <main id="valid-view" class="card hidden">
-      <div class="badge-row">
-        <div class="badge">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <polyline points="20 6 9 17 4 12"></polyline>
-          </svg>
-          <span>Đã mở khóa 2/2 Chặng</span>
-        </div>
-        <span class="security-pill">1 KEY = 1 URL</span>
-      </div>
-
-      <h1>Mã Key 24 Giờ Của Bạn</h1>
-      <p class="subtitle">
-        Mã kích hoạt dưới đây được gắn cố định với đường dẫn URL hiện tại. Tải lại trang (F5) vẫn giữ nguyên mã này và tự động xóa sau 24 giờ.
-      </p>
+      <h1>Key 24 Giờ Của Bạn</h1>
 
       <div class="key-box">
-        <span class="key-label">License Key (24 Hours Trial)</span>
-        <div id="key-display" class="key-value">ĐANG KHỞI TẠO...</div>
-      </div>
-
-      <div class="url-lock-bar" title="Đường dẫn định danh duy nhất cho Key này">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-          <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-        </svg>
-        <span id="unique-url-text" class="url-lock-text">Đang khóa URL định danh...</span>
+        <div id="key-display" class="key-value">...</div>
       </div>
 
       <div class="actions-stack">
@@ -782,66 +562,30 @@
             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
           </svg>
-          <span id="copy-text">SAO CHÉP MÃ KEY</span>
+          <span id="copy-text">SAO CHÉP KEY</span>
         </button>
 
         <a id="open-app-btn" href="#" class="btn-secondary">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
           </svg>
-          <span>MỞ &amp; KÍCH HOẠT TRỰC TIẾP TRÊN APP</span>
+          <span>MỞ TRỰC TIẾP TRÊN APP</span>
         </a>
       </div>
 
       <div class="meta-row">
-        <span>Tự động xóa khỏi hệ thống sau:</span>
+        <span>Thời hạn:</span>
         <span id="countdown" class="timer">23:59:59</span>
       </div>
-
-      <section class="steps" aria-label="Hướng dẫn kích hoạt">
-        <div class="steps-title">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="10"></circle>
-            <line x1="12" y1="16" x2="12" y2="12"></line>
-            <line x1="12" y1="8" x2="12.01" y2="8"></line>
-          </svg>
-          <span>Hướng dẫn kích hoạt nhanh:</span>
-        </div>
-        <ol>
-          <li>Nhấn <strong>Sao chép mã Key</strong> (hoặc nút <strong>Mở &amp; Kích hoạt trực tiếp trên App</strong>).</li>
-          <li>Mở <strong>ChessPro.exe</strong> ngoài Desktop, dán mã vào ô nhập Key và nhấn <strong>Xác nhận</strong>.</li>
-          <li>Hệ thống Supabase sẽ tự động khóa mã Key này vào HWID máy tính của bạn trong 24 giờ.</li>
-        </ol>
-      </section>
     </main>
 
-    <!-- GIAO DIỆN 3: LỖI 403 / 410 -->
+    <!-- MÀN HÌNH 3: LỖI -->
     <main id="error-view" class="card hidden" role="alert">
-      <div class="badge-row">
-        <div class="badge badge-error">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="10"></circle>
-            <line x1="12" y1="8" x2="12" y2="12"></line>
-            <line x1="12" y1="16" x2="12.01" y2="16"></line>
-          </svg>
-          <span id="error-badge-text">LỖI XÁC THỰC (403)</span>
-        </div>
-      </div>
-
-      <h1 id="error-title">Đường Dẫn Không Hợp Lệ Hoặc Bỏ Qua Chặng</h1>
-      <p id="error-desc" class="subtitle">
-        Phát hiện truy cập tắt bỏ qua chặng vượt link hoặc tự ý thay đổi tham số trên thanh địa chỉ. Vui lòng thực hiện tuần tự từ Chặng 1.
-      </p>
-
-      <div class="actions-stack">
-        <button id="reset-claim-btn" class="btn-primary" type="button">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <polyline points="23 4 23 10 17 10"></polyline>
-            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
-          </svg>
-          <span>QUAY LẠI CHẶNG ĐẦU TIÊN</span>
-        </button>
-      </div>
+      <h1 id="error-title">Đường Dẫn Không Hợp Lệ</h1>
+      <p id="error-desc" class="error-msg">Vui lòng thực hiện tuần tự từ Chặng 1.</p>
+      <button id="reset-claim-btn" class="btn-primary" type="button">
+        <span>QUAY LẠI</span>
+      </button>
     </main>
   </div>
 
@@ -851,7 +595,6 @@
       const STEP_STORAGE_KEY = 'csp_checkpoint_progress_v2';
       const SECRET_STR = 'CHESS_STEALTH_PRO_WEB24H_SECRET_2026';
       const LINKVERTISE_USER_ID = '10578379';
-      const SHRINKME_API_TOKEN = '3a69f43114c9d3aac76d5247afb96abb314238c4';
 
       function buildLinkvertiseUrl(stepNum) {
         const base = `${window.location.origin}${window.location.pathname}?step=${stepNum}`;
@@ -883,9 +626,7 @@
       let activeClaim = null;
 
       const checkpointView = document.getElementById('checkpoint-view');
-      const cpBadgeText = document.getElementById('cp-badge-text');
       const cpTitle = document.getElementById('cp-title');
-      const cpDesc = document.getElementById('cp-desc');
       const stepBox1 = document.getElementById('step-box-1');
       const stepBox2 = document.getElementById('step-box-2');
       const stepText1 = document.getElementById('step-text-1');
@@ -899,13 +640,11 @@
 
       const validView = document.getElementById('valid-view');
       const errorView = document.getElementById('error-view');
-      const errorBadgeText = document.getElementById('error-badge-text');
       const errorTitle = document.getElementById('error-title');
       const errorDesc = document.getElementById('error-desc');
       const resetClaimBtn = document.getElementById('reset-claim-btn');
 
       const keyDisplay = document.getElementById('key-display');
-      const uniqueUrlText = document.getElementById('unique-url-text');
       const copyBtn = document.getElementById('copy-btn');
       const copyText = document.getElementById('copy-text');
       const openAppBtn = document.getElementById('open-app-btn');
@@ -966,11 +705,10 @@
         };
       }
 
-      function showErrorState(code, title, desc) {
+      function showErrorState(title, desc) {
         checkpointView.classList.add('hidden');
         validView.classList.add('hidden');
         errorView.classList.remove('hidden');
-        errorBadgeText.textContent = `MÃ LỖI ${code}`;
         errorTitle.textContent = title;
         errorDesc.textContent = desc;
       }
@@ -982,24 +720,20 @@
 
         if (stepDone === 0) {
           currentTargetStep = 1;
-          cpBadgeText.textContent = 'XÁC THỰC 2 CHẶNG (0 / 2)';
-          cpTitle.textContent = 'Mở Khóa Mã Bản Quyền 24 Giờ';
-          cpDesc.textContent = 'Chọn cổng vượt link bên dưới và hoàn thành Chặng 1/2 để tiếp tục.';
+          cpTitle.textContent = 'Nhận Key 24 Giờ';
           stepBox1.className = 'step-item active';
           stepBox2.className = 'step-item';
-          stepText1.textContent = 'Đang chờ vượt';
-          stepText2.textContent = 'Đang khóa';
-          goStepText.textContent = 'BẮT ĐẦU VƯỢT CHẶNG 1 (1/2)';
+          stepText1.textContent = 'Chặng 1';
+          stepText2.textContent = 'Chặng 2';
+          goStepText.textContent = 'VƯỢT CHẶNG 1 (1 / 2)';
         } else {
           currentTargetStep = 2;
-          cpBadgeText.textContent = 'ĐÃ HOÀN THÀNH CHẶNG 1 (1 / 2)';
-          cpTitle.textContent = 'Chặng Cuối Cùng (2 / 2)';
-          cpDesc.textContent = 'Bạn đã vượt xong Chặng 1! Hãy vượt nốt Chặng 2 để hệ thống mở khóa Mã Key 24 Giờ.';
+          cpTitle.textContent = 'Hoàn Thành Chặng 1';
           stepBox1.className = 'step-item done';
           stepBox2.className = 'step-item active';
-          stepText1.textContent = 'Đã hoàn thành';
-          stepText2.textContent = 'Sẵn sàng mở khóa';
-          goStepText.textContent = 'TIẾP TỤC VƯỢT CHẶNG 2 (NHẬN KEY)';
+          stepText1.textContent = 'Đã xong';
+          stepText2.textContent = 'Chặng 2';
+          goStepText.textContent = 'VƯỢT CHẶNG 2 (2 / 2)';
         }
       }
 
@@ -1009,7 +743,6 @@
         errorView.classList.add('hidden');
         validView.classList.remove('hidden');
         keyDisplay.textContent = claim.licenseKey;
-        uniqueUrlText.textContent = `${window.location.origin}${window.location.pathname}?token=${claim.urlToken}`;
         openAppBtn.href = `chesspro://activate?key=${encodeURIComponent(claim.licenseKey)}`;
       }
 
@@ -1023,7 +756,7 @@
           localStorage.setItem(STEP_STORAGE_KEY, JSON.stringify(prev));
         } catch (_) {}
 
-        const provLinks = SHORTENER_LINKS[selectedProvider] || SHORTENER_LINKS.shrinkme;
+        const provLinks = SHORTENER_LINKS[selectedProvider] || SHORTENER_LINKS.link4m;
         const dest = (currentTargetStep === 1 ? provLinks.step1 : provLinks.step2) || buildLinkvertiseUrl(currentTargetStep);
         window.location.href = dest;
       });
@@ -1047,11 +780,7 @@
         if (urlTokenParam) {
           const parts = urlTokenParam.trim().toUpperCase().split('-');
           if (parts.length !== 3 || parts[0].length !== 6 || parts[1].length !== 8 || parts[2].length !== 10) {
-            showErrorState(
-              403,
-              'Đường Dẫn Nhận Key Không Hợp Lệ',
-              'Cấu trúc URL đã bị chỉnh sửa. Mỗi mã Key 24h chỉ gắn với 1 đường dẫn định danh duy nhất.'
-            );
+            showErrorState('URL Không Hợp Lệ', 'Đường dẫn đã bị thay đổi.');
             return;
           }
 
@@ -1059,21 +788,13 @@
           const expSec = parseInt(expHex, 16);
           const expectedUrlSig = (await hmacHex(`URL:${tId}:${expHex}`)).slice(0, 10);
           if (isNaN(expSec) || providedSig !== expectedUrlSig) {
-            showErrorState(
-              403,
-              'Phát Hiện Thay Đổi Đường Dẫn URL',
-              'Chữ ký bảo mật của URL không khớp. Bạn không thể đổi URL để lấy mã Key khác.'
-            );
+            showErrorState('URL Không Hợp Lệ', 'Chữ ký đường dẫn không khớp.');
             return;
           }
 
           if (expSec <= nowSec) {
             try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
-            showErrorState(
-              410,
-              'Đường Dẫn & Mã Key Đã Tự Động Xóa (Quá 24 Giờ)',
-              'Đường dẫn nhận Key này đã hết hạn 24 giờ và bị thu hồi tự động khỏi hệ thống.'
-            );
+            showErrorState('Key Đã Hết Hạn', 'Key 24 giờ đã tự động xóa.');
             return;
           }
 
@@ -1085,7 +806,9 @@
         let stepState = {};
         try {
           stepState = JSON.parse(localStorage.getItem(STEP_STORAGE_KEY) || '{}');
-          if (stepState.provider) setProvider(stepState.provider);
+          if (stepState.provider && SHORTENER_LINKS[stepState.provider]) {
+            setProvider(stepState.provider);
+          }
         } catch (_) {}
 
         if (stepParam === '1') {
@@ -1101,11 +824,7 @@
 
         if (stepParam === '2') {
           if (!stepState.step1Completed || (nowSec - (stepState.step1Time || 0)) > 7200) {
-            showErrorState(
-              403,
-              'Phát Hiện Bỏ Qua Chặng 1!',
-              'Bạn chưa hoàn thành Chặng 1/2 mà đã truy cập thẳng vào Chặng 2. Vui lòng vượt tuần tự từ Chặng 1.'
-            );
+            showErrorState('Chưa Qua Chặng 1', 'Vui lòng vượt Chặng 1 trước.');
             return;
           }
 
@@ -1147,10 +866,10 @@
         if (!activeClaim) return;
         try {
           await navigator.clipboard.writeText(activeClaim.licenseKey);
-          copyText.textContent = 'ĐÃ SAO CHÉP VÀO CLIPBOARD';
+          copyText.textContent = 'ĐÃ SAO CHÉP';
           setTimeout(() => {
-            copyText.textContent = 'SAO CHÉP MÃ KEY';
-          }, 2200);
+            copyText.textContent = 'SAO CHÉP KEY';
+          }, 2000);
         } catch (_) {
           const range = document.createRange();
           range.selectNodeContents(keyDisplay);
@@ -1158,7 +877,7 @@
           sel.removeAllRanges();
           sel.addRange(range);
           document.execCommand('copy');
-          copyText.textContent = 'ĐÃ SAO CHÉP VÀO CLIPBOARD';
+          copyText.textContent = 'ĐÃ SAO CHÉP';
         }
       });
 
@@ -1167,11 +886,7 @@
         const nowSec = Math.floor(Date.now() / 1000);
         const rem = Math.max(0, activeClaim.expSec - nowSec);
         if (rem === 0) {
-          showErrorState(
-            410,
-            'Đường Dẫn & Mã Key Đã Tự Động Xóa (Quá 24 Giờ)',
-            'Mã Key 24 giờ của bạn vừa hết thời hạn hiệu lực và đã tự động bị hủy.'
-          );
+          showErrorState('Key Đã Hết Hạn', 'Key 24 giờ đã tự động xóa.');
           return;
         }
         const h = String(Math.floor(rem / 3600)).padStart(2, '0');

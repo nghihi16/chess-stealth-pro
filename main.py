@@ -7,9 +7,23 @@ import subprocess
 import sys
 import threading
 import time
-import tkinter as tk
-from tkinter import messagebox
 import urllib.parse
+
+from PySide6.QtCore import QPointF, Qt, QTimer
+from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPolygonF
+from PySide6.QtWidgets import (
+    QApplication,
+    QButtonGroup,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QRadioButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 if sys.stdout is None:
     sys.stdout = open(os.devnull, "w", encoding="utf-8")
@@ -500,284 +514,270 @@ def launch_stealth_engine(browser_type: str, active_key: str, hwid: str):
 
     threading.Thread(target=periodic_reverify, daemon=True).start()
 
-    root = tk.Tk()
-    root.overrideredirect(True)
-    root.attributes("-topmost", True)
-    root.attributes("-transparentcolor", "black")
-    root.attributes("-alpha", 0.86)
+    app = QApplication.instance() or QApplication(sys.argv)
+    overlay = QtStealthOverlay()
+    overlay.showFullScreen()
+    app.exec()
 
-    sw = root.winfo_screenwidth()
-    sh = root.winfo_screenheight()
-    root.geometry(f"{sw}x{sh}+0+0")
 
-    canvas = tk.Canvas(root, width=sw, height=sh, bg="black", highlightthickness=0)
-    canvas.pack(fill="both", expand=True)
+class QtStealthOverlay(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
+            | Qt.WindowType.WindowTransparentForInput
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
 
-    root.update_idletasks()
-    hwnd = ctypes.windll.user32.GetParent(root.winfo_id())
-    if not hwnd:
-        hwnd = root.winfo_id()
+        hwnd = int(self.winId())
+        ex_style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+        ctypes.windll.user32.SetWindowLongW(
+            hwnd,
+            GWL_EXSTYLE,
+            ex_style | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW,
+        )
+        ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)
 
-    ex_style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-    ctypes.windll.user32.SetWindowLongW(
-        hwnd,
-        GWL_EXSTYLE,
-        ex_style | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW,
-    )
-    ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._tick)
+        self.timer.start(20)
 
-    def render_loop():
-        canvas.delete("all")
-        now = time.time()
-
-        # [CHỐNG CRACK RẢI RÁC] Hệ số tỷ lệ lấy trực tiếp từ việc xác thực chữ ký Ed25519 trong RAM
-        gate_scale = derive_arrow_scale_factor()
-
-        if gate_scale > 0.0 and arrow_state["show"] and (now - arrow_state["last_seen"] <= 1.8):
-            x1 = arrow_state["x1"]
-            y1 = arrow_state["y1"] + arrow_state["offset_y"]
-            x2 = arrow_state["x2"]
-            y2 = arrow_state["y2"] + arrow_state["offset_y"]
-            sq = max(32, arrow_state["size"]) * gate_scale
-
-            dx = x2 - x1
-            dy = y2 - y1
-            dist = math.hypot(dx, dy)
-            if dist > 6:
-                ux, uy = dx / dist, dy / dist
-                px, py = -uy, ux
-
-                shaft_w = sq * 0.22
-                head_w = sq * 0.50
-                head_l = sq * 0.38
-                offset = sq * 0.12
-
-                sx, sy = x1 + ux * offset, y1 + uy * offset
-                nx, ny = x2 - ux * head_l, y2 - uy * head_l
-
-                pts = [
-                    sx + px * (shaft_w / 2),
-                    sy + py * (shaft_w / 2),
-                    nx + px * (shaft_w / 2),
-                    ny + py * (shaft_w / 2),
-                    nx + px * (head_w / 2),
-                    ny + py * (head_w / 2),
-                    x2,
-                    y2,
-                    nx - px * (head_w / 2),
-                    ny - py * (head_w / 2),
-                    nx - px * (shaft_w / 2),
-                    ny - py * (shaft_w / 2),
-                    sx - px * (shaft_w / 2),
-                    sy - py * (shaft_w / 2),
-                ]
-                canvas.create_polygon(pts, fill="#ffaa00", outline="")
-
+    def _tick(self):
         if (ctypes.windll.user32.GetAsyncKeyState(0x12) & 0x8000) and (
             ctypes.windll.user32.GetAsyncKeyState(0x51) & 0x8000
         ):
-            root.destroy()
+            QApplication.quit()
             sys.exit(0)
+        self.update()
 
-        root.after(20, render_loop)
+    def paintEvent(self, _event):
+        now = time.time()
+        gate_scale = derive_arrow_scale_factor()
+        if gate_scale <= 0.0 or not arrow_state["show"] or (now - arrow_state["last_seen"] > 1.8):
+            return
 
-    render_loop()
-    root.mainloop()
+        x1 = float(arrow_state["x1"])
+        y1 = float(arrow_state["y1"] + arrow_state["offset_y"])
+        x2 = float(arrow_state["x2"])
+        y2 = float(arrow_state["y2"] + arrow_state["offset_y"])
+        sq = max(32.0, float(arrow_state["size"])) * gate_scale
+
+        dx = x2 - x1
+        dy = y2 - y1
+        dist = math.hypot(dx, dy)
+        if dist <= 6:
+            return
+
+        ux, uy = dx / dist, dy / dist
+        px, py = -uy, ux
+
+        shaft_w = sq * 0.22
+        head_w = sq * 0.50
+        head_l = sq * 0.38
+        offset = sq * 0.12
+
+        sx, sy = x1 + ux * offset, y1 + uy * offset
+        nx, ny = x2 - ux * head_l, y2 - uy * head_l
+
+        poly = QPolygonF(
+            [
+                QPointF(sx + px * (shaft_w / 2), sy + py * (shaft_w / 2)),
+                QPointF(nx + px * (shaft_w / 2), ny + py * (shaft_w / 2)),
+                QPointF(nx + px * (head_w / 2), ny + py * (head_w / 2)),
+                QPointF(x2, y2),
+                QPointF(nx - px * (head_w / 2), ny - py * (head_w / 2)),
+                QPointF(nx - px * (shaft_w / 2), ny - py * (shaft_w / 2)),
+                QPointF(sx - px * (shaft_w / 2), sy - py * (shaft_w / 2)),
+            ]
+        )
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(255, 170, 0, 220))
+        painter.drawPolygon(poly)
 
 
-# ================= BỘ TOKEN GIAO DIỆN UI/UX PRO MAX (DARK & LIGHT) =================
-UI_THEMES = {
-    "dark": {
-        "bg": "#0b0d12",
-        "card": "#131722",
-        "elevated": "#1c2230",
-        "elevated_hover": "#262e40",
-        "border": "#2e3646",
-        "focus": "#f59e0b",
-        "text": "#f8fafc",
-        "subtext": "#cbd5e1",
-        "muted": "#94a3b8",
-        "amber": "#f59e0b",
-        "amber_hover": "#fbbf24",
-        "amber_fg": "#09090b",
-        "green": "#10b981",
-        "green_hover": "#34d399",
-        "green_fg": "#07080a",
-        "sky": "#38bdf8",
-    },
-    "light": {
-        "bg": "#f1f5f9",
-        "card": "#ffffff",
-        "elevated": "#f8fafc",
-        "elevated_hover": "#e2e8f0",
-        "border": "#cbd5e1",
-        "focus": "#d97706",
-        "text": "#0f172a",
-        "subtext": "#334155",
-        "muted": "#475569",
-        "amber": "#d97706",
-        "amber_hover": "#b45309",
-        "amber_fg": "#ffffff",
-        "green": "#059669",
-        "green_hover": "#047857",
-        "green_fg": "#ffffff",
-        "sky": "#0284c7",
-    },
-}
+# ================= LOGO QUÂN MÃ CỜ VUA (CHESS KNIGHT VECTOR) =================
+class KnightLogoWidget(QWidget):
+    def __init__(self, size: int = 38, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(size, size)
+
+    def paintEvent(self, _event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        # Nền bo góc hiện đại
+        bg_path = QPainterPath()
+        bg_path.addRoundedRect(1, 1, self.width() - 2, self.height() - 2, 10, 10)
+        p.fillPath(bg_path, QColor(245, 158, 11, 36))
+        p.setPen(QPen(QColor("#f59e0b"), 1.5))
+        p.drawPath(bg_path)
+
+        # Vẽ Quân Mã (Stealth Knight) bằng Vector Polygon
+        s = self.width() / 24.0
+        knight_pts = QPolygonF(
+            [
+                QPointF(7 * s, 18 * s),
+                QPointF(8 * s, 12 * s),
+                QPointF(5 * s, 10 * s),
+                QPointF(7 * s, 5 * s),
+                QPointF(11 * s, 6 * s),
+                QPointF(14 * s, 3 * s),
+                QPointF(17 * s, 7 * s),
+                QPointF(18 * s, 12 * s),
+                QPointF(17 * s, 18 * s),
+            ]
+        )
+        p.setPen(QPen(QColor("#f59e0b"), 1.8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        p.setBrush(QColor(245, 158, 11, 55))
+        p.drawPolygon(knight_pts)
+        p.drawLine(QPointF(5 * s, 20.5 * s), QPointF(19 * s, 20.5 * s))
+
+
+def _build_qss(theme: str) -> str:
+    if theme == "light":
+        return """
+        QWidget#Root { background-color: #f1f5f9; color: #0f172a; font-family: 'Segoe UI'; }
+        QFrame#Card { background-color: #ffffff; border: 1px solid #cbd5e1; border-radius: 16px; }
+        QLabel#Title { color: #0f172a; font-size: 16px; font-weight: 700; }
+        QLabel#Muted { color: #475569; font-size: 12px; font-weight: 600; }
+        QLineEdit {
+            background-color: #f8fafc; color: #0f172a;
+            border: 1px solid #cbd5e1; border-radius: 10px;
+            padding: 10px 12px; font-family: 'Consolas'; font-size: 14px; font-weight: 700;
+        }
+        QLineEdit:focus { border: 2px solid #d97706; background-color: #ffffff; }
+        QPushButton#PrimaryBtn {
+            background-color: #d97706; color: #ffffff;
+            border: none; border-radius: 10px;
+            min-height: 44px; font-size: 13px; font-weight: 700;
+        }
+        QPushButton#PrimaryBtn:hover { background-color: #b45309; }
+        QPushButton#SecondaryBtn {
+            background-color: #ffffff; color: #0f172a;
+            border: 1px solid #cbd5e1; border-radius: 10px;
+            min-height: 42px; font-size: 12px; font-weight: 600; padding: 0 12px;
+        }
+        QPushButton#SecondaryBtn:hover { border: 1px solid #d97706; background-color: #f8fafc; }
+        QRadioButton { color: #0f172a; font-size: 13px; font-weight: 600; spacing: 10px; padding: 8px 4px; }
+        QRadioButton::indicator { width: 18px; height: 18px; border-radius: 9px; border: 2px solid #94a3b8; }
+        QRadioButton::indicator:checked { background-color: #d97706; border: 2px solid #d97706; }
+        """
+    return """
+    QWidget#Root { background-color: #090b10; color: #f8fafc; font-family: 'Segoe UI'; }
+    QFrame#Card { background-color: #12151e; border: 1px solid #262b3d; border-radius: 16px; }
+    QLabel#Title { color: #f8fafc; font-size: 16px; font-weight: 700; }
+    QLabel#Muted { color: #94a3b8; font-size: 12px; font-weight: 600; }
+    QLineEdit {
+        background-color: #1a1f2e; color: #f8fafc;
+        border: 1px solid #2e364f; border-radius: 10px;
+        padding: 10px 12px; font-family: 'Consolas'; font-size: 14px; font-weight: 700;
+    }
+    QLineEdit:focus { border: 2px solid #f59e0b; background-color: #1e2436; }
+    QPushButton#PrimaryBtn {
+        background-color: #f59e0b; color: #09090b;
+        border: none; border-radius: 10px;
+        min-height: 44px; font-size: 13px; font-weight: 700;
+    }
+    QPushButton#PrimaryBtn:hover { background-color: #fbbf24; }
+    QPushButton#SecondaryBtn {
+        background-color: #1a1f2e; color: #f8fafc;
+        border: 1px solid #2e364f; border-radius: 10px;
+        min-height: 42px; font-size: 12px; font-weight: 600; padding: 0 12px;
+    }
+    QPushButton#SecondaryBtn:hover { border: 1px solid #f59e0b; background-color: #232a3d; }
+    QRadioButton { color: #f8fafc; font-size: 13px; font-weight: 600; spacing: 10px; padding: 8px 4px; }
+    QRadioButton::indicator { width: 18px; height: 18px; border-radius: 9px; border: 2px solid #475569; }
+    QRadioButton::indicator:checked { background-color: #f59e0b; border: 2px solid #f59e0b; }
+    """
+
+
 _CURRENT_THEME = "dark"
 
 
-def _bind_hover(widget, bg_normal: str, bg_hover: str, fg_normal: str = None, fg_hover: str = None):
-    def _on_enter(_):
-        widget.config(bg=bg_hover)
-        if fg_hover:
-            widget.config(fg=fg_hover)
-
-    def _on_leave(_):
-        widget.config(bg=bg_normal)
-        if fg_normal:
-            widget.config(fg=fg_normal)
-
-    widget.bind("<Enter>", _on_enter)
-    widget.bind("<Leave>", _on_leave)
-
-
-# ================= POPUP CHỌN TRÌNH DUYỆT (UI/UX PRO MAX) =================
-def show_browser_selector(license_info: str, active_key: str, hwid: str):
+def show_browser_selector(_license_info: str, active_key: str, hwid: str):
     global _CURRENT_THEME
-    try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)
-    except Exception:
-        pass
+    app = QApplication.instance() or QApplication(sys.argv)
 
-    sel_root = tk.Tk()
-    sel_root.title("Chess Stealth Pro — Cấu Hình Trình Duyệt")
-    sel_root.geometry("480x420")
-    sel_root.resizable(False, False)
-    sel_root.eval("tk::PlaceWindow . center")
+    win = QWidget()
+    win.setObjectName("Root")
+    win.setWindowTitle("Chess Stealth Pro")
+    win.setFixedSize(420, 340)
+    win.setStyleSheet(_build_qss(_CURRENT_THEME))
 
-    browser_var = tk.StringVar(value="min")
-    container = tk.Frame(sel_root)
-    container.pack(fill="both", expand=True)
+    layout = QVBoxLayout(win)
+    layout.setContentsMargins(20, 20, 20, 20)
+    layout.setSpacing(14)
 
-    def build_selector_ui():
-        for w in container.winfo_children():
-            w.destroy()
-        t = UI_THEMES[_CURRENT_THEME]
-        sel_root.configure(bg=t["bg"])
-        container.configure(bg=t["bg"], padx=24, pady=16)
+    top = QHBoxLayout()
+    top.addWidget(KnightLogoWidget(36))
+    title = QLabel("Chọn Trình Duyệt")
+    title.setObjectName("Title")
+    top.addWidget(title)
+    top.addStretch()
 
-        top = tk.Frame(container, bg=t["bg"])
-        top.pack(fill="x", pady=(0, 12))
+    theme_btn = QPushButton("Sáng / Tối")
+    theme_btn.setObjectName("SecondaryBtn")
+    theme_btn.setCursor(Qt.CursorShape.PointingHandCursor)
 
-        title_lbl = tk.Label(
-            top,
-            text="CHỌN TRÌNH DUYỆT KHỞI CHẠY",
-            fg=t["text"],
-            bg=t["bg"],
-            font=("Segoe UI", 13, "bold"),
-        )
-        title_lbl.pack(side="left")
+    def toggle_theme():
+        global _CURRENT_THEME
+        _CURRENT_THEME = "light" if _CURRENT_THEME == "dark" else "dark"
+        win.setStyleSheet(_build_qss(_CURRENT_THEME))
 
-        def toggle_theme():
-            global _CURRENT_THEME
-            _CURRENT_THEME = "light" if _CURRENT_THEME == "dark" else "dark"
-            build_selector_ui()
+    theme_btn.clicked.connect(toggle_theme)
+    top.addWidget(theme_btn)
+    layout.addLayout(top)
 
-        theme_btn = tk.Button(
-            top,
-            text="Sáng / Tối",
-            command=toggle_theme,
-            bg=t["elevated"],
-            fg=t["subtext"],
-            font=("Segoe UI", 8, "bold"),
-            relief="flat",
-            bd=0,
-            padx=10,
-            pady=6,
-            cursor="hand2",
-        )
-        theme_btn.pack(side="right")
-        _bind_hover(theme_btn, t["elevated"], t["elevated_hover"])
+    card = QFrame()
+    card.setObjectName("Card")
+    card_layout = QVBoxLayout(card)
+    card_layout.setContentsMargins(16, 12, 16, 12)
+    card_layout.setSpacing(4)
 
-        badge = tk.Label(
-            container,
-            text=f"Bản quyền đã xác thực: {license_info}",
-            fg=t["green"],
-            bg=t["card"],
-            font=("Segoe UI", 9, "bold"),
-            padx=12,
-            pady=6,
-        )
-        badge.pack(fill="x", pady=(0, 12))
+    group = QButtonGroup(win)
+    browsers = [
+        ("Min Browser", "min"),
+        ("Brave Browser", "brave"),
+        ("Google Chrome", "chrome"),
+        ("Chỉ bật Overlay", "other"),
+    ]
+    selected_browser = {"val": "min"}
 
-        card = tk.Frame(
-            container,
-            bg=t["card"],
-            highlightbackground=t["border"],
-            highlightthickness=1,
-            padx=16,
-            pady=12,
-        )
-        card.pack(fill="x", pady=(0, 16))
+    for idx, (label_text, val) in enumerate(browsers):
+        rb = QRadioButton(label_text)
+        rb.setCursor(Qt.CursorShape.PointingHandCursor)
+        if idx == 0:
+            rb.setChecked(True)
+        rb.toggled.connect(lambda checked, v=val: selected_browser.update({"val": v}) if checked else None)
+        group.addButton(rb)
+        card_layout.addWidget(rb)
 
-        browsers = [
-            ("Min Browser (Tự động nạp Stealth Bridge & mở)", "min"),
-            ("Brave Browser (Tự động nạp Extension & mở)", "brave"),
-            ("Google Chrome (Tự động nạp Extension & mở)", "chrome"),
-            ("Chỉ bật Overlay (Đã mở sẵn trình duyệt ngoài)", "other"),
-        ]
+    layout.addWidget(card)
 
-        for label_text, val in browsers:
-            rb = tk.Radiobutton(
-                card,
-                text=label_text,
-                variable=browser_var,
-                value=val,
-                fg=t["text"],
-                bg=t["card"],
-                selectcolor=t["elevated"],
-                activebackground=t["card"],
-                activeforeground=t["amber"],
-                font=("Segoe UI", 9, "bold" if browser_var.get() == val else "normal"),
-                pady=6,
-                cursor="hand2",
-            )
-            rb.pack(anchor="w", fill="x")
+    start_btn = QPushButton("BẮT ĐẦU")
+    start_btn.setObjectName("PrimaryBtn")
+    start_btn.setCursor(Qt.CursorShape.PointingHandCursor)
 
-        def start_app():
-            chosen = browser_var.get()
-            sel_root.destroy()
-            launch_stealth_engine(chosen, active_key, hwid)
+    def on_start():
+        chosen = selected_browser["val"]
+        win.close()
+        launch_stealth_engine(chosen, active_key, hwid)
 
-        start_btn = tk.Button(
-            container,
-            text="KHỞI ĐỘNG HỆ THỐNG (ALT+X: ẨN/HIỆN | ALT+Q: THOÁT)",
-            command=start_app,
-            bg=t["amber"],
-            fg=t["amber_fg"],
-            activebackground=t["amber_hover"],
-            activeforeground=t["amber_fg"],
-            font=("Segoe UI", 10, "bold"),
-            relief="flat",
-            cursor="hand2",
-            pady=11,
-        )
-        start_btn.pack(fill="x")
-        _bind_hover(start_btn, t["amber"], t["amber_hover"])
+    start_btn.clicked.connect(on_start)
+    layout.addWidget(start_btn)
 
-    build_selector_ui()
-    sel_root.mainloop()
+    win.show()
+    app.exec()
 
 
-# ================= POPUP BẮT BUỘC NHẬP KEY KHI MỞ .EXE (UI/UX PRO MAX) =================
 def main():
     global _CURRENT_THEME
-    try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)
-    except Exception:
-        pass
-
     register_custom_url_scheme("chesspro")
     start_background_api_server("127.0.0.1", 8766)
 
@@ -792,22 +792,93 @@ def main():
         except Exception:
             pass
 
-    root = tk.Tk()
-    root.title("Chess Stealth Pro — Xác Thực Bản Quyền")
-    root.geometry("480x380")
-    root.resizable(False, False)
-    root.eval("tk::PlaceWindow . center")
+    app = QApplication.instance() or QApplication(sys.argv)
 
-    key_var = tk.StringVar(value=saved_key)
-    shell = tk.Frame(root)
-    shell.pack(fill="both", expand=True)
+    win = QWidget()
+    win.setObjectName("Root")
+    win.setWindowTitle("Chess Stealth Pro")
+    win.setFixedSize(430, 290)
+    win.setStyleSheet(_build_qss(_CURRENT_THEME))
 
-    def handle_activate(event=None):
-        k = key_var.get().strip()
+    layout = QVBoxLayout(win)
+    layout.setContentsMargins(20, 20, 20, 20)
+    layout.setSpacing(14)
+
+    # Top Header
+    top = QHBoxLayout()
+    top.setSpacing(10)
+    top.addWidget(KnightLogoWidget(36))
+    title = QLabel("CHESS STEALTH PRO")
+    title.setObjectName("Title")
+    top.addWidget(title)
+    top.addStretch()
+
+    copy_hwid_btn = QPushButton("Copy HWID")
+    copy_hwid_btn.setObjectName("SecondaryBtn")
+    copy_hwid_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def copy_hwid():
+        QApplication.clipboard().setText(hwid)
+        copy_hwid_btn.setText("Đã chép")
+
+    copy_hwid_btn.clicked.connect(copy_hwid)
+    top.addWidget(copy_hwid_btn)
+
+    theme_btn = QPushButton("Sáng / Tối")
+    theme_btn.setObjectName("SecondaryBtn")
+    theme_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def toggle_theme():
+        global _CURRENT_THEME
+        _CURRENT_THEME = "light" if _CURRENT_THEME == "dark" else "dark"
+        win.setStyleSheet(_build_qss(_CURRENT_THEME))
+
+    theme_btn.clicked.connect(toggle_theme)
+    top.addWidget(theme_btn)
+    layout.addLayout(top)
+
+    # Card
+    card = QFrame()
+    card.setObjectName("Card")
+    card_layout = QVBoxLayout(card)
+    card_layout.setContentsMargins(16, 16, 16, 16)
+    card_layout.setSpacing(12)
+
+    key_input = QLineEdit()
+    key_input.setPlaceholderText("Nhập License Key...")
+    key_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    if saved_key:
+        key_input.setText(saved_key)
+    card_layout.addWidget(key_input)
+
+    act_btn = QPushButton("KÍCH HOẠT")
+    act_btn.setObjectName("PrimaryBtn")
+    act_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    card_layout.addWidget(act_btn)
+    layout.addWidget(card)
+
+    # Bottom Buttons
+    bottom = QHBoxLayout()
+    bottom.setSpacing(10)
+
+    get_key_btn = QPushButton("Lấy Key 24h")
+    get_key_btn.setObjectName("SecondaryBtn")
+    get_key_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    get_key_btn.clicked.connect(lambda: os.startfile(WEB_GET_KEY_URL))
+    bottom.addWidget(get_key_btn)
+
+    buy_btn = QPushButton("Mua Key VIP")
+    buy_btn.setObjectName("SecondaryBtn")
+    buy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    buy_btn.clicked.connect(lambda: os.startfile(BUY_LIFE_URL))
+    bottom.addWidget(buy_btn)
+    layout.addLayout(bottom)
+
+    def handle_activate():
+        k = key_input.text().strip()
         if not k:
-            messagebox.showwarning("Thiếu Key", "Vui lòng nhập mã License Key!")
+            QMessageBox.warning(win, "Thiếu Key", "Vui lòng nhập mã License Key!")
             return
-
         valid, msg = activate_or_verify_key(API_BASE_URL, k, hwid)
         if valid:
             try:
@@ -815,215 +886,19 @@ def main():
                     f.write(k)
             except Exception:
                 pass
-            root.destroy()
+            win.close()
             show_browser_selector(msg, k, hwid)
         else:
-            messagebox.showerror("Xác thực thất bại", msg)
+            QMessageBox.critical(win, "Lỗi", msg)
 
-    root.bind("<Return>", handle_activate)
+    act_btn.clicked.connect(handle_activate)
+    key_input.returnPressed.connect(handle_activate)
 
-    def render_main_ui():
-        for w in shell.winfo_children():
-            w.destroy()
-        t = UI_THEMES[_CURRENT_THEME]
-        root.configure(bg=t["bg"])
-        shell.configure(bg=t["bg"], padx=24, pady=16)
-
-        # Header Bar (8dp rhythm)
-        header = tk.Frame(shell, bg=t["bg"])
-        header.pack(fill="x", pady=(0, 12))
-
-        brand_frame = tk.Frame(header, bg=t["bg"])
-        brand_frame.pack(side="left")
-
-        # Vector Shield Canvas Icon (No Emoji)
-        icon_cv = tk.Canvas(
-            brand_frame, width=28, height=28, bg=t["bg"], highlightthickness=0
-        )
-        icon_cv.pack(side="left", padx=(0, 8))
-        icon_cv.create_polygon(
-            14, 3, 24, 7, 24, 15, 14, 25, 4, 15, 4, 7,
-            fill=t["card"], outline=t["amber"], width=2
-        )
-
-        title_box = tk.Frame(brand_frame, bg=t["bg"])
-        title_box.pack(side="left")
-        tk.Label(
-            title_box,
-            text="CHESS STEALTH PRO",
-            fg=t["text"],
-            bg=t["bg"],
-            font=("Segoe UI", 12, "bold"),
-        ).pack(anchor="w")
-        tk.Label(
-            title_box,
-            text="SUPABASE CLOUD  •  ED25519 VERIFIED",
-            fg=t["amber"],
-            bg=t["bg"],
-            font=("Segoe UI", 7, "bold"),
-        ).pack(anchor="w")
-
-        def toggle_theme():
-            global _CURRENT_THEME
-            _CURRENT_THEME = "light" if _CURRENT_THEME == "dark" else "dark"
-            render_main_ui()
-
-        theme_btn = tk.Button(
-            header,
-            text="Sáng / Tối",
-            command=toggle_theme,
-            bg=t["elevated"],
-            fg=t["subtext"],
-            font=("Segoe UI", 8, "bold"),
-            relief="flat",
-            padx=10,
-            pady=6,
-            cursor="hand2",
-        )
-        theme_btn.pack(side="right")
-        _bind_hover(theme_btn, t["elevated"], t["elevated_hover"])
-
-        # Main Card Surface
-        card = tk.Frame(
-            shell,
-            bg=t["card"],
-            highlightbackground=t["border"],
-            highlightthickness=1,
-            padx=20,
-            pady=16,
-        )
-        card.pack(fill="x", pady=(0, 12))
-
-        # HWID Row
-        hwid_row = tk.Frame(card, bg=t["card"])
-        hwid_row.pack(fill="x", pady=(0, 12))
-
-        tk.Label(
-            hwid_row,
-            text=f"HWID: {hwid}",
-            fg=t["muted"],
-            bg=t["card"],
-            font=("Consolas", 9, "bold"),
-        ).pack(side="left")
-
-        def copy_hwid():
-            root.clipboard_clear()
-            root.clipboard_append(hwid)
-            copy_btn.config(text="Đã chép HWID", fg=t["green"])
-
-        copy_btn = tk.Button(
-            hwid_row,
-            text="Sao chép HWID",
-            command=copy_hwid,
-            bg=t["elevated"],
-            fg=t["subtext"],
-            font=("Segoe UI", 8, "bold"),
-            relief="flat",
-            padx=10,
-            pady=4,
-            cursor="hand2",
-        )
-        copy_btn.pack(side="right")
-        _bind_hover(copy_btn, t["elevated"], t["elevated_hover"])
-
-        tk.Label(
-            card,
-            text="Nhập Mã Bản Quyền (24 Giờ / 30 Ngày / Vĩnh Viễn):",
-            fg=t["subtext"],
-            bg=t["card"],
-            font=("Segoe UI", 9, "bold"),
-        ).pack(anchor="w", pady=(0, 6))
-
-        entry_border = tk.Frame(
-            card,
-            bg=t["elevated"],
-            highlightbackground=t["border"],
-            highlightthickness=1,
-            padx=2,
-            pady=2,
-        )
-        entry_border.pack(fill="x", pady=(0, 16))
-
-        key_entry = tk.Entry(
-            entry_border,
-            textvariable=key_var,
-            font=("Consolas", 12, "bold"),
-            bg=t["elevated"],
-            fg=t["text"],
-            insertbackground=t["text"],
-            relief="flat",
-            justify="center",
-        )
-        key_entry.pack(fill="x", ipady=8)
-        key_entry.focus_set()
-
-        key_entry.bind(
-            "<FocusIn>", lambda _: entry_border.config(highlightbackground=t["focus"])
-        )
-        key_entry.bind(
-            "<FocusOut>", lambda _: entry_border.config(highlightbackground=t["border"])
-        )
-
-        # Primary CTA (>= 44px height)
-        act_btn = tk.Button(
-            card,
-            text="XÁC NHẬN & KÍCH HOẠT NGAY",
-            command=handle_activate,
-            bg=t["green"],
-            fg=t["green_fg"],
-            activebackground=t["green_hover"],
-            activeforeground=t["green_fg"],
-            font=("Segoe UI", 10, "bold"),
-            relief="flat",
-            cursor="hand2",
-            pady=10,
-        )
-        act_btn.pack(fill="x")
-        _bind_hover(act_btn, t["green"], t["green_hover"])
-
-        # Bottom Secondary Actions Grid (8dp gap)
-        sub_frame = tk.Frame(shell, bg=t["bg"])
-        sub_frame.pack(fill="x")
-        sub_frame.columnconfigure(0, weight=1)
-        sub_frame.columnconfigure(1, weight=1)
-
-        def open_dynamic_get_key():
-            os.startfile(WEB_GET_KEY_URL)
-
-        free_btn = tk.Button(
-            sub_frame,
-            text="Lấy Key 24h (Vượt Link)",
-            command=open_dynamic_get_key,
-            bg=t["elevated"],
-            fg=t["amber"],
-            font=("Segoe UI", 9, "bold"),
-            relief="flat",
-            cursor="hand2",
-            pady=9,
-        )
-        free_btn.grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        _bind_hover(free_btn, t["elevated"], t["elevated_hover"])
-
-        buy_btn = tk.Button(
-            sub_frame,
-            text="Mua Key 30 Ngày / VIP",
-            command=lambda: os.startfile(BUY_LIFE_URL),
-            bg=t["elevated"],
-            fg=t["sky"],
-            font=("Segoe UI", 9, "bold"),
-            relief="flat",
-            cursor="hand2",
-            pady=9,
-        )
-        buy_btn.grid(row=0, column=1, sticky="ew", padx=(6, 0))
-        _bind_hover(buy_btn, t["elevated"], t["elevated_hover"])
-
-    render_main_ui()
-
+    win.show()
     if url_scheme_key:
-        root.after(250, handle_activate)
+        QTimer.singleShot(250, handle_activate)
 
-    root.mainloop()
+    app.exec()
 
 
 if __name__ == "__main__":
