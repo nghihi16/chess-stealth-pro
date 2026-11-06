@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import os
 import secrets
 import sqlite3
@@ -319,3 +321,58 @@ def create_license_record(
     conn.commit()
     row = conn.execute("SELECT * FROM licenses WHERE id = ?", (cursor.lastrowid,)).fetchone()
     return dict(row)
+
+
+WEB24H_HMAC_SECRET = b"CHESS_STEALTH_PRO_WEB24H_SECRET_2026"
+
+
+def ensure_web24h_key_in_db(conn, clean_key: str) -> Optional[dict]:
+    """
+    Kiểm tra nếu `clean_key` là mã 24h được sinh từ trang Web vượt link (`FREE24H-<ID6>-<EXPHEX8>-<SIG6>`):
+    - Xác thực chữ ký HMAC-SHA256 và hạn dùng 24h.
+    - Nếu hợp lệ và chưa có trên Supabase `licenses`, tự động lưu vào `licenses` với đúng thời hạn `expires_at`.
+    """
+    parts = clean_key.strip().upper().split("-")
+    if len(parts) != 4 or parts[0] != "FREE24H":
+        return None
+
+    _, token_id, exp_hex, key_sig = parts
+    if len(token_id) != 6 or len(exp_hex) != 8 or len(key_sig) != 6:
+        return None
+
+    try:
+        exp_ts = int(exp_hex, 16)
+    except ValueError:
+        return None
+
+    expected_sig = (
+        hmac.new(
+            WEB24H_HMAC_SECRET,
+            f"KEY:{token_id}:{exp_hex}".encode("utf-8"),
+            hashlib.sha256,
+        )
+        .hexdigest()
+        .upper()[:6]
+    )
+    if not hmac.compare_digest(key_sig, expected_sig):
+        return None
+
+    now = int(time.time())
+    if exp_ts <= now or exp_ts > now + 86400 + 600:
+        return None
+
+    existing = conn.execute("SELECT * FROM licenses WHERE key = ?", (clean_key,)).fetchone()
+    if existing:
+        return dict(existing)
+
+    cursor = conn.execute(
+        """
+        INSERT INTO licenses (key, type, status, hwid, hwid_reset_count, created_at, activated_at, expires_at)
+        VALUES (?, 'trial_24h', 'active', NULL, 0, ?, NULL, ?)
+        """,
+        (clean_key, now, exp_ts),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM licenses WHERE id = ?", (cursor.lastrowid,)).fetchone()
+    return dict(row) if row else None
+

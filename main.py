@@ -23,6 +23,9 @@ from license_core.verifier import activate_or_verify_key, derive_arrow_scale_fac
 
 # ================= CẤU HÌNH HỆ THỐNG =================
 API_BASE_URL = os.environ.get("CHESSPRO_API_URL", "http://127.0.0.1:8766")
+WEB_GET_KEY_URL = os.environ.get(
+    "CHESSPRO_GET_KEY_URL", "https://nghihi16.github.io/chess-stealth-pro/"
+)
 BUY_LIFE_URL = "https://gumroad.com/"
 
 APP_DIR = os.path.join(os.getenv("APPDATA", os.path.expanduser("~")), "ChessStealthPro")
@@ -779,8 +782,7 @@ def main():
     sub_frame.pack(pady=2)
 
     def open_dynamic_get_key():
-        target_url = f"{API_BASE_URL.rstrip('/')}/get-link?hwid={urllib.parse.quote(hwid)}"
-        os.startfile(target_url)
+        os.startfile(WEB_GET_KEY_URL)
 
     tk.Button(
         sub_frame,

@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="vi" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chess Stealth Pro — Cổng Nhận Key 24 Giờ (1 Key = 1 URL)</title>
+  <style>
+    :root[data-theme="dark"] {
+      --bg-page: #09090b;
+      --bg-card: rgba(24, 24, 27, 0.92);
+      --bg-elevated: #27272a;
+      --bg-key: #09090b;
+      --border-subtle: #3f3f46;
+      --border-focus: #f59e0b;
+      --text-primary: #f4f4f5;
+      --text-secondary: #d4d4d8;
+      --text-muted: #a1a1aa;
+      --accent-amber: #f59e0b;
+      --accent-amber-hover: #fbbf24;
+      --accent-green: #4ade80;
+      --accent-green-bg: rgba(74, 222, 128, 0.14);
+      --accent-red: #f87171;
+      --accent-red-bg: rgba(248, 113, 113, 0.14);
+      --btn-secondary-bg: #27272a;
+      --btn-secondary-hover: #3f3f46;
+      --shadow-card: 0 16px 40px rgba(0, 0, 0, 0.65);
+    }
+
+    :root[data-theme="light"] {
+      --bg-page: #f4f4f5;
+      --bg-card: rgba(255, 255, 255, 0.96);
+      --bg-elevated: #f4f4f5;
+      --bg-key: #f8fafc;
+      --border-subtle: #d4d4d8;
+      --border-focus: #b45309;
+      --text-primary: #18181b;
+      --text-secondary: #3f3f46;
+      --text-muted: #52525b;
+      --accent-amber: #d97706;
+      --accent-amber-hover: #b45309;
+      --accent-green: #15803d;
+      --accent-green-bg: rgba(21, 128, 61, 0.12);
+      --accent-red: #b91c1c;
+      --accent-red-bg: rgba(185, 28, 28, 0.1);
+      --btn-secondary-bg: #e4e4e7;
+      --btn-secondary-hover: #d4d4d8;
+      --shadow-card: 0 12px 32px rgba(24, 24, 27, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      min-height: 100vh;
+      background-color: var(--bg-page);
+      color: var(--text-primary);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px;
+      line-height: 1.5;
+      transition: background-color 0.2s ease, color 0.2s ease;
+    }
+
+    .topbar {
+      width: 100%;
+      max-width: 520px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+      font-size: 16px;
+      color: var(--text-primary);
+      letter-spacing: -0.01em;
+    }
+
+    .brand svg {
+      color: var(--accent-amber);
+      flex-shrink: 0;
+    }
+
+    .theme-btn {
+      min-width: 44px;
+      min-height: 44px;
+      border-radius: 8px;
+      border: 1px solid var(--border-subtle);
+      background: var(--bg-card);
+      color: var(--text-primary);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .theme-btn:hover {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.2);
+    }
+
+    .theme-btn:focus-visible {
+      outline: 2px solid var(--border-focus);
+      outline-offset: 2px;
+    }
+
+    .card {
+      width: 100%;
+      max-width: 520px;
+      background: var(--bg-card);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--border-subtle);
+      border-radius: 16px;
+      padding: 32px 24px;
+      box-shadow: var(--shadow-card);
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--accent-green-bg);
+      color: var(--accent-green);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 12px;
+      border-radius: 999px;
+      margin-bottom: 16px;
+    }
+
+    .badge.badge-error {
+      background: var(--accent-red-bg);
+      color: var(--accent-red);
+    }
+
+    h1 {
+      font-size: 22px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      letter-spacing: -0.02em;
+    }
+
+    .subtitle {
+      font-size: 14px;
+      color: var(--text-secondary);
+      margin-bottom: 24px;
+    }
+
+    .key-box {
+      background: var(--bg-key);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 16px;
+      text-align: center;
+      margin-bottom: 16px;
+    }
+
+    .key-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+      display: block;
+      font-weight: 600;
+    }
+
+    .key-value {
+      font-family: "JetBrains Mono", Consolas, monospace;
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--accent-green);
+      letter-spacing: 0.04em;
+      word-break: break-all;
+      user-select: all;
+      min-height: 30px;
+    }
+
+    .url-lock-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 8px 12px;
+      margin-bottom: 16px;
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .url-lock-bar svg {
+      color: var(--accent-amber);
+      flex-shrink: 0;
+    }
+
+    .url-lock-text {
+      font-family: Consolas, monospace;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .actions-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .btn-primary {
+      width: 100%;
+      min-height: 48px;
+      background: var(--accent-amber);
+      color: #09090b;
+      border: 1px solid transparent;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      text-decoration: none;
+      transition: background-color 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+    }
+
+    .btn-primary:hover {
+      background: var(--accent-amber-hover);
+      box-shadow: 0 0 18px rgba(245, 158, 11, 0.4);
+    }
+
+    .btn-primary:focus-visible {
+      outline: 2px solid var(--border-focus);
+      outline-offset: 2px;
+    }
+
+    .btn-secondary {
+      width: 100%;
+      min-height: 48px;
+      background: var(--btn-secondary-bg);
+      color: var(--text-primary);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      text-decoration: none;
+      transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .btn-secondary:hover {
+      background: var(--btn-secondary-hover);
+      border-color: var(--border-focus);
+      box-shadow: 0 0 12px rgba(245, 158, 11, 0.18);
+    }
+
+    .btn-secondary:focus-visible {
+      outline: 2px solid var(--border-focus);
+      outline-offset: 2px;
+    }
+
+    .meta-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border-subtle);
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .timer {
+      font-family: Consolas, monospace;
+      font-weight: 700;
+      font-size: 14px;
+      color: var(--text-primary);
+    }
+
+    .steps {
+      margin-top: 24px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 16px;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .steps-title {
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+
+    .steps ol {
+      padding-left: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    @media (max-width: 620px) {
+      body {
+        padding: 16px 12px;
+      }
+      .card {
+        padding: 24px 16px;
+      }
+      .key-value {
+        font-size: 17px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+      </svg>
+      <span>CHESS STEALTH PRO</span>
+    </div>
+    <button id="theme-toggle" class="theme-btn" type="button" aria-label="Chuyển đổi giao diện Sáng/Tối">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="5"></circle>
+        <line x1="12" y1="1" x2="12" y2="3"></line>
+        <line x1="12" y1="21" x2="12" y2="23"></line>
+        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+        <line x1="1" y1="12" x2="3" y2="12"></line>
+        <line x1="21" y1="12" x2="23" y2="12"></line>
+        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+      </svg>
+    </button>
+  </header>
+
+  <!-- GIAO DIỆN HỢP LỆ: HIỂN THỊ KEY 24H DUY NHẤT -->
+  <main id="valid-view" class="card">
+    <div class="badge">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polyline points="20 6 9 17 4 12"></polyline>
+      </svg>
+      <span>1 Key = 1 URL Duy Nhất (Đồng bộ Supabase)</span>
+    </div>
+
+    <h1>Mã Key 24 Giờ Của Bạn</h1>
+    <p class="subtitle">Mã kích hoạt dưới đây gắn cố định với đường dẫn URL hiện tại. Tải lại trang (F5) vẫn giữ nguyên mã này và tự động xóa sau 24 giờ.</p>
+
+    <div class="key-box">
+      <span class="key-label">License Key (24 Hours Trial)</span>
+      <div id="key-display" class="key-value">ĐANG KHỞI TẠO...</div>
+    </div>
+
+    <div class="url-lock-bar" title="Đường dẫn định danh duy nhất cho Key này">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+        <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+      </svg>
+      <span id="unique-url-text" class="url-lock-text">Đang khóa URL định danh...</span>
+    </div>
+
+    <div class="actions-stack">
+      <button id="copy-btn" class="btn-primary" type="button">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+        </svg>
+        <span id="copy-text">SAO CHÉP MÃ KEY</span>
+      </button>
+
+      <a id="open-app-btn" href="#" class="btn-secondary">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+        </svg>
+        <span>MỞ &amp; KÍCH HOẠT TRỰC TIẾP TRÊN APP</span>
+      </a>
+    </div>
+
+    <div class="meta-row">
+      <span>Tự động xóa sau:</span>
+      <span id="countdown" class="timer">23:59:59</span>
+    </div>
+
+    <section class="steps" aria-label="Hướng dẫn kích hoạt">
+      <div class="steps-title">Hướng dẫn sử dụng:</div>
+      <ol>
+        <li>Nhấn <strong>Sao chép mã Key</strong> (hoặc nhấn <strong>Mở &amp; Kích hoạt trực tiếp trên App</strong>).</li>
+        <li>Mở <strong>ChessPro.exe</strong> trên máy tính, dán mã vào ô nhập Key và nhấn <strong>Xác nhận</strong>.</li>
+        <li>Hệ thống Supabase sẽ tự động khóa mã Key này vào HWID máy tính của bạn trong 24 giờ.</li>
+      </ol>
+    </section>
+  </main>
+
+  <!-- GIAO DIỆN LỖI 403 / 410 KHI SỬA URL HOẶC HẾT HẠN 24H -->
+  <main id="error-view" class="card hidden" role="alert">
+    <div class="badge badge-error">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="10"></circle>
+        <line x1="12" y1="8" x2="12" y2="12"></line>
+        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+      </svg>
+      <span id="error-badge-text">LỖI XÁC THỰC URL (403)</span>
+    </div>
+
+    <h1 id="error-title">Đường Dẫn Nhận Key Không Hợp Lệ</h1>
+    <p id="error-desc" class="subtitle">
+      Mỗi mã Key 24h được gắn cứng với 1 URL duy nhất có chữ ký số. Việc tự ý thay đổi tham số trên thanh địa chỉ hoặc truy cập URL đã quá hạn 24 giờ sẽ bị từ chối.
+    </p>
+
+    <div class="actions-stack">
+      <button id="reset-claim-btn" class="btn-primary" type="button">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="23 4 23 10 17 10"></polyline>
+          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+        </svg>
+        <span>QUAY VỀ ĐƯỜNG DẪN HỢP LỆ CỦA BẠN</span>
+      </button>
+    </div>
+  </main>
+
+  <script>
+    (function () {
+      const STORAGE_KEY = 'csp_unique_url_claim_v2';
+      const SECRET_STR = 'CHESS_STEALTH_PRO_WEB24H_SECRET_2026';
+
+      const validView = document.getElementById('valid-view');
+      const errorView = document.getElementById('error-view');
+      const errorBadgeText = document.getElementById('error-badge-text');
+      const errorTitle = document.getElementById('error-title');
+      const errorDesc = document.getElementById('error-desc');
+      const resetClaimBtn = document.getElementById('reset-claim-btn');
+
+      const keyDisplay = document.getElementById('key-display');
+      const uniqueUrlText = document.getElementById('unique-url-text');
+      const copyBtn = document.getElementById('copy-btn');
+      const copyText = document.getElementById('copy-text');
+      const openAppBtn = document.getElementById('open-app-btn');
+      const countdownEl = document.getElementById('countdown');
+      const themeToggle = document.getElementById('theme-toggle');
+
+      themeToggle.addEventListener('click', () => {
+        const html = document.documentElement;
+        const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+        html.setAttribute('data-theme', next);
+      });
+
+      async function hmacHex(message) {
+        const enc = new TextEncoder();
+        const cryptoKey = await crypto.subtle.importKey(
+          'raw',
+          enc.encode(SECRET_STR),
+          { name: 'HMAC', hash: 'SHA-256' },
+          false,
+          ['sign']
+        );
+        const sigBuf = await crypto.subtle.sign('HMAC', cryptoKey, enc.encode(message));
+        return Array.from(new Uint8Array(sigBuf))
+          .map(b => b.toString(16).padStart(2, '0'))
+          .join('')
+          .toUpperCase();
+      }
+
+      function randomHex6() {
+        const arr = new Uint8Array(3);
+        crypto.getRandomValues(arr);
+        return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+      }
+
+      async function buildTokenAndKey(tokenId, expSec) {
+        const expHex = expSec.toString(16).toUpperCase().padStart(8, '0');
+        const urlSig = (await hmacHex(`URL:${tokenId}:${expHex}`)).slice(0, 10);
+        const keySig = (await hmacHex(`KEY:${tokenId}:${expHex}`)).slice(0, 6);
+        return {
+          tokenId,
+          expSec,
+          expHex,
+          urlToken: `${tokenId}-${expHex}-${urlSig}`,
+          licenseKey: `FREE24H-${tokenId}-${expHex}-${keySig}`
+        };
+      }
+
+      function showErrorState(code, title, desc) {
+        validView.classList.add('hidden');
+        errorView.classList.remove('hidden');
+        errorBadgeText.textContent = `MÃ LỖI ${code}`;
+        errorTitle.textContent = title;
+        errorDesc.textContent = desc;
+      }
+
+      let activeClaim = null;
+
+      async function initPage() {
+        const nowSec = Math.floor(Date.now() / 1000);
+        const params = new URLSearchParams(window.location.search);
+        const urlTokenParam = params.get('token');
+
+        // 1. Kiểm tra cache 24h trong trình duyệt (chống tạo key mới khi F5 hoặc mở lại trang đích)
+        let savedClaim = null;
+        try {
+          const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
+          if (raw && raw.expSec > nowSec && raw.urlToken && raw.licenseKey) {
+            savedClaim = raw;
+          } else if (raw && raw.expSec <= nowSec) {
+            localStorage.removeItem(STORAGE_KEY);
+          }
+        } catch (_) {}
+
+        // 2. Nếu trên thanh địa chỉ ĐÃ CÓ ?token=... -> Bắt buộc kiểm tra chữ ký số của URL
+        if (urlTokenParam) {
+          const parts = urlTokenParam.trim().toUpperCase().split('-');
+          if (parts.length !== 3 || parts[0].length !== 6 || parts[1].length !== 8 || parts[2].length !== 10) {
+            showErrorState(
+              403,
+              'Đường Dẫn Nhận Key Không Hợp Lệ',
+              'Cấu trúc URL đã bị chỉnh sửa. Mỗi mã Key 24h chỉ gắn với 1 đường dẫn định danh duy nhất.'
+            );
+            return;
+          }
+
+          const [tId, expHex, providedSig] = parts;
+          const expSec = parseInt(expHex, 16);
+          if (isNaN(expSec)) {
+            showErrorState(403, 'Tham Số Thời Gian Lỗi', 'Đường dẫn chứa tham số thời gian không hợp lệ.');
+            return;
+          }
+
+          const expectedUrlSig = (await hmacHex(`URL:${tId}:${expHex}`)).slice(0, 10);
+          if (providedSig !== expectedUrlSig) {
+            showErrorState(
+              403,
+              'Phát Hiện Thay Đổi Đường Dẫn URL',
+              'Chữ ký bảo mật của URL không khớp. Bạn không thể đổi URL để lấy mã Key khác.'
+            );
+            return;
+          }
+
+          if (expSec <= nowSec) {
+            try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
+            showErrorState(
+              410,
+              'Đường Dẫn & Mã Key Đã Tự Động Xóa (Quá 24 Giờ)',
+              'Đường dẫn nhận Key này đã hết hạn 24 giờ và bị thu hồi tự động khỏi hệ thống.'
+            );
+            return;
+          }
+
+          activeClaim = await buildTokenAndKey(tId, expSec);
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(activeClaim));
+          } catch (_) {}
+        } else {
+          // 3. Nếu vừa vượt link tới trang gốc (chưa có ?token=...)
+          if (savedClaim) {
+            activeClaim = savedClaim;
+          } else {
+            const newId = randomHex6();
+            const newExp = nowSec + 86400;
+            activeClaim = await buildTokenAndKey(newId, newExp);
+            try {
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(activeClaim));
+            } catch (_) {}
+          }
+          // Khóa cứng URL trên thanh địa chỉ thành ?token=<DUY_NHẤT> để F5 không tạo key mới
+          const newUrl = `${window.location.pathname}?token=${activeClaim.urlToken}`;
+          window.history.replaceState({ token: activeClaim.urlToken }, '', newUrl);
+        }
+
+        // Hiển thị thông tin Key & URL duy nhất
+        validView.classList.remove('hidden');
+        errorView.classList.add('hidden');
+        keyDisplay.textContent = activeClaim.licenseKey;
+        uniqueUrlText.textContent = `${window.location.origin}${window.location.pathname}?token=${activeClaim.urlToken}`;
+        openAppBtn.href = `chesspro://activate?key=${encodeURIComponent(activeClaim.licenseKey)}`;
+      }
+
+      resetClaimBtn.addEventListener('click', () => {
+        window.location.href = window.location.pathname;
+      });
+
+      copyBtn.addEventListener('click', async () => {
+        if (!activeClaim) return;
+        try {
+          await navigator.clipboard.writeText(activeClaim.licenseKey);
+          copyText.textContent = 'ĐÃ SAO CHÉP VÀO CLIPBOARD';
+          setTimeout(() => {
+            copyText.textContent = 'SAO CHÉP MÃ KEY';
+          }, 2200);
+        } catch (_) {
+          const range = document.createRange();
+          range.selectNodeContents(keyDisplay);
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+          document.execCommand('copy');
+          copyText.textContent = 'ĐÃ SAO CHÉP VÀO CLIPBOARD';
+        }
+      });
+
+      setInterval(() => {
+        if (!activeClaim) return;
+        const nowSec = Math.floor(Date.now() / 1000);
+        const rem = Math.max(0, activeClaim.expSec - nowSec);
+        if (rem === 0) {
+          showErrorState(
+            410,
+            'Đường Dẫn & Mã Key Đã Tự Động Xóa (Quá 24 Giờ)',
+            'Mã Key 24 giờ của bạn vừa hết thời hạn hiệu lực và đã tự động bị hủy.'
+          );
+          return;
+        }
+        const h = String(Math.floor(rem / 3600)).padStart(2, '0');
+        const m = String(Math.floor((rem % 3600) / 60)).padStart(2, '0');
+        const s = String(rem % 60).padStart(2, '0');
+        countdownEl.textContent = `${h}:${m}:${s}`;
+      }, 1000);
+
+      initPage();
+    })();
+  </script>
+</body>
+</html>

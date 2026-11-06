@@ -24,6 +24,7 @@ from api.schemas import (
 from db.database import (
     cleanup_expired_records,
     create_license_record,
+    ensure_web24h_key_in_db,
     get_connection,
 )
 from license_core.crypto_ed25519 import sign_response_payload
@@ -95,6 +96,7 @@ async def verify_license(req: VerifyRequest, request: Request):
 
     with get_connection() as conn:
         cleanup_expired_records(conn)
+        ensure_web24h_key_in_db(conn, key_clean)
         row = conn.execute(
             "SELECT * FROM licenses WHERE key = ?", (key_clean,)
         ).fetchone()
@@ -182,6 +184,7 @@ async def activate_license(req: ActivateRequest, request: Request):
 
     with get_connection() as conn:
         cleanup_expired_records(conn)
+        ensure_web24h_key_in_db(conn, key_clean)
         row = conn.execute(
             "SELECT * FROM licenses WHERE key = ?", (key_clean,)
         ).fetchone()
@@ -275,6 +278,7 @@ async def reset_hwid(req: ResetHwidRequest, request: Request):
 
     with get_connection() as conn:
         cleanup_expired_records(conn)
+        ensure_web24h_key_in_db(conn, key_clean)
         row = conn.execute(
             "SELECT * FROM licenses WHERE key = ?", (key_clean,)
         ).fetchone()

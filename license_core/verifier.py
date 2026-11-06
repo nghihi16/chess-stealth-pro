@@ -4,7 +4,7 @@ import secrets
 import time
 import urllib.error
 import urllib.request
-from db.database import cleanup_expired_records, get_connection
+from db.database import cleanup_expired_records, ensure_web24h_key_in_db, get_connection
 from license_core.crypto_ed25519 import (
     ED25519_PUBLIC_KEY_HEX,
     sign_response_payload,
@@ -81,6 +81,7 @@ def _direct_supabase_verify_or_activate(clean_key: str, hwid_val: str, nonce: st
     now = int(time.time())
     with get_connection() as conn:
         cleanup_expired_records(conn)
+        ensure_web24h_key_in_db(conn, clean_key)
         row = conn.execute(
             "SELECT * FROM licenses WHERE key = ?", (clean_key,)
         ).fetchone()
