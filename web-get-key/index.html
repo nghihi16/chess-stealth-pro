@@ -349,7 +349,7 @@
 
     .provider-grid {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(2, 1fr);
       gap: 8px;
       margin-bottom: 24px;
     }
@@ -693,12 +693,22 @@
 
       <span class="section-label">Chọn Cổng Vượt Link Ưu Tiên:</span>
       <div class="provider-grid" role="group" aria-label="Chọn nhà cung cấp vượt link">
-        <button id="prov-shrinkme" class="provider-btn selected" type="button">
+        <button id="prov-link4m" class="provider-btn selected" type="button">
+          <div class="prov-top">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+            <span class="prov-tag">Việt Nam</span>
+          </div>
+          <span class="prov-name">Link4m.com</span>
+        </button>
+
+        <button id="prov-shrinkme" class="provider-btn" type="button">
           <div class="prov-top">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
             </svg>
-            <span class="prov-tag">Khuyên dùng</span>
+            <span class="prov-tag">Ổn định</span>
           </div>
           <span class="prov-name">ShrinkMe.io</span>
         </button>
@@ -708,7 +718,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
             </svg>
-            <span class="prov-tag">Nhanh</span>
+            <span class="prov-tag">Gaming</span>
           </div>
           <span class="prov-name">LootLabs</span>
         </button>
@@ -850,6 +860,10 @@
       }
 
       const SHORTENER_LINKS = {
+        link4m: {
+          step1: 'https://link4m.org/np1nkMU3',
+          step2: 'https://link4m.org/B8IuTLZ'
+        },
         shrinkme: {
           step1: 'https://shrinkme.click/ChessProStep1v2',
           step2: 'https://shrinkme.click/ChessProStep2v2'
@@ -864,7 +878,7 @@
         }
       };
 
-      let selectedProvider = 'shrinkme';
+      let selectedProvider = 'link4m';
       let currentTargetStep = 1;
       let activeClaim = null;
 
@@ -876,6 +890,7 @@
       const stepBox2 = document.getElementById('step-box-2');
       const stepText1 = document.getElementById('step-text-1');
       const stepText2 = document.getElementById('step-text-2');
+      const provLink4m = document.getElementById('prov-link4m');
       const provShrinkme = document.getElementById('prov-shrinkme');
       const provLootlabs = document.getElementById('prov-lootlabs');
       const provLinkvertise = document.getElementById('prov-linkvertise');
@@ -905,11 +920,13 @@
 
       function setProvider(name) {
         selectedProvider = name;
+        provLink4m.classList.toggle('selected', name === 'link4m');
         provShrinkme.classList.toggle('selected', name === 'shrinkme');
         provLootlabs.classList.toggle('selected', name === 'lootlabs');
         provLinkvertise.classList.toggle('selected', name === 'linkvertise');
       }
 
+      provLink4m.addEventListener('click', () => setProvider('link4m'));
       provShrinkme.addEventListener('click', () => setProvider('shrinkme'));
       provLootlabs.addEventListener('click', () => setProvider('lootlabs'));
       provLinkvertise.addEventListener('click', () => setProvider('linkvertise'));
