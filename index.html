@@ -479,7 +479,13 @@
 
     <span class="provider-label">Chọn Cổng Vượt Link:</span>
     <div class="provider-grid" role="group" aria-label="Chọn nhà cung cấp vượt link">
-      <button id="prov-linkvertise" class="provider-btn selected" type="button">
+      <button id="prov-shrinkme" class="provider-btn selected" type="button">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+        </svg>
+        <span>ShrinkMe.io</span>
+      </button>
+      <button id="prov-linkvertise" class="provider-btn" type="button">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
           <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
@@ -491,12 +497,6 @@
           <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
         </svg>
         <span>LootLabs</span>
-      </button>
-      <button id="prov-workink" class="provider-btn" type="button">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-        </svg>
-        <span>Work.ink</span>
       </button>
     </div>
 
@@ -602,12 +602,30 @@
       const SECRET_STR = 'CHESS_STEALTH_PRO_WEB24H_SECRET_2026';
       const LINKVERTISE_USER_ID = '10578379';
       const LOOTLABS_API_TOKEN = '302dc17ea2f8d2451ca43467aac3accaafc8e40258793bad1b19d074e9eaa6e7';
+      const SHRINKME_API_TOKEN = '3a69f43114c9d3aac76d5247afb96abb314238c4';
 
       // Tạo Dynamic Link của Linkvertise (gắn Publisher ID 10578379)
       function buildLinkvertiseUrl(stepNum) {
         const base = `${window.location.origin}${window.location.pathname}?step=${stepNum}`;
         const rand = Math.floor(Math.random() * 900 + 100);
         return `https://link-to.net/${LINKVERTISE_USER_ID}/${rand}/dynamic?r=${btoa(encodeURI(base))}`;
+      }
+
+      // Gọi trực tiếp API ShrinkMe.io để tạo link rút gọn cho từng Chặng (1 hoặc 2)
+      async function buildShrinkMeUrl(stepNum) {
+        const fallback = stepNum === 1
+          ? 'https://shrinkme.click/ChessProStep1v2'
+          : 'https://shrinkme.click/ChessProStep2v2';
+        try {
+          const targetUrl = `${window.location.origin}${window.location.pathname}?step=${stepNum}`;
+          const apiUrl = `https://shrinkme.io/api?api=${SHRINKME_API_TOKEN}&url=${encodeURIComponent(targetUrl)}`;
+          const res = await fetch(apiUrl);
+          const data = await res.json();
+          if (data && data.status === 'success' && data.shortenedUrl) {
+            return data.shortenedUrl;
+          }
+        } catch (_) {}
+        return fallback;
       }
 
       // Gọi trực tiếp API LootLabs để tạo link vượt động cho từng Chặng (1 hoặc 2)
@@ -630,6 +648,10 @@
       }
 
       const SHORTENER_LINKS = {
+        shrinkme: {
+          step1: 'https://shrinkme.click/ChessProStep1v2',
+          step2: 'https://shrinkme.click/ChessProStep2v2'
+        },
         linkvertise: {
           step1: null,
           step2: null
@@ -637,14 +659,10 @@
         lootlabs: {
           step1: null,
           step2: null
-        },
-        workink: {
-          step1: null,
-          step2: null
         }
       };
 
-      let selectedProvider = 'linkvertise';
+      let selectedProvider = 'shrinkme';
       let currentTargetStep = 1;
       let activeClaim = null;
 
@@ -656,9 +674,9 @@
       const stepBox2 = document.getElementById('step-box-2');
       const stepText1 = document.getElementById('step-text-1');
       const stepText2 = document.getElementById('step-text-2');
+      const provShrinkme = document.getElementById('prov-shrinkme');
       const provLinkvertise = document.getElementById('prov-linkvertise');
       const provLootlabs = document.getElementById('prov-lootlabs');
-      const provWorkink = document.getElementById('prov-workink');
       const goStepBtn = document.getElementById('go-step-btn');
       const goStepText = document.getElementById('go-step-text');
 
@@ -685,14 +703,14 @@
 
       function setProvider(name) {
         selectedProvider = name;
+        provShrinkme.classList.toggle('selected', name === 'shrinkme');
         provLinkvertise.classList.toggle('selected', name === 'linkvertise');
         provLootlabs.classList.toggle('selected', name === 'lootlabs');
-        provWorkink.classList.toggle('selected', name === 'workink');
       }
 
+      provShrinkme.addEventListener('click', () => setProvider('shrinkme'));
       provLinkvertise.addEventListener('click', () => setProvider('linkvertise'));
       provLootlabs.addEventListener('click', () => setProvider('lootlabs'));
-      provWorkink.addEventListener('click', () => setProvider('workink'));
 
       async function hmacHex(message) {
         const enc = new TextEncoder();
@@ -785,7 +803,7 @@
           localStorage.setItem(STEP_STORAGE_KEY, JSON.stringify(prev));
         } catch (_) {}
 
-        const provLinks = SHORTENER_LINKS[selectedProvider] || SHORTENER_LINKS.linkvertise;
+        const provLinks = SHORTENER_LINKS[selectedProvider] || SHORTENER_LINKS.shrinkme;
         let dest = currentTargetStep === 1 ? provLinks.step1 : provLinks.step2;
         if (!dest) {
           if (selectedProvider === 'lootlabs') {
@@ -794,7 +812,7 @@
             try {
               dest = await buildLootLabsUrl(currentTargetStep);
             } catch (_) {
-              dest = buildLinkvertiseUrl(currentTargetStep);
+              dest = await buildShrinkMeUrl(currentTargetStep);
             } finally {
               goStepText.textContent = origText;
             }
