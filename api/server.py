@@ -24,10 +24,10 @@ app.include_router(router)
 
 def start_background_api_server(host: str = "127.0.0.1", port: int = 8766) -> None:
     """Khởi chạy FastAPI License Server chạy ngầm phục vụ xác thực Ed25519 và tạo URL nhận Key."""
-    run_migrations(seed_defaults=True)
 
     def _run():
         try:
+            run_migrations(seed_defaults=True)
             config = uvicorn.Config(app, host=host, port=port, log_level="error", log_config=None)
             server = uvicorn.Server(config)
             server.run()

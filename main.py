@@ -11,6 +11,11 @@ import tkinter as tk
 from tkinter import messagebox
 import urllib.parse
 
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w", encoding="utf-8")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w", encoding="utf-8")
+
 from api.server import start_background_api_server
 from license_core.hwid import get_hwid
 from license_core.url_scheme import parse_url_scheme_arg, register_custom_url_scheme

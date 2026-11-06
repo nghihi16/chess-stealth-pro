@@ -1,11 +1,17 @@
+import os
 import sys
 import tkinter as tk
+
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w", encoding="utf-8")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w", encoding="utf-8")
+
 from db.database import create_license_record, get_connection
 from db.migrate import run_migrations
 
 
 def create_db_key(ltype: str, hwid: str = "") -> str:
-    run_migrations(seed_defaults=True)
     hwid_clean = hwid.strip().upper() if hwid.strip() else None
     with get_connection() as conn:
         rec = create_license_record(
@@ -18,9 +24,8 @@ def create_db_key(ltype: str, hwid: str = "") -> str:
 
 
 def run_gui():
-    run_migrations(seed_defaults=True)
     root = tk.Tk()
-    root.title("Chess Stealth Pro - Admin License Manager")
+    root.title("Chess Stealth Pro - Admin License Manager (Supabase Cloud)")
     root.geometry("460x320")
     root.configure(bg="#18181b")
     root.resizable(False, False)
@@ -28,7 +33,7 @@ def run_gui():
 
     tk.Label(
         root,
-        text="ADMIN LICENSE MANAGER (SQLite + Ed25519)",
+        text="ADMIN LICENSE MANAGER (Supabase + Ed25519)",
         fg="#f59e0b",
         bg="#18181b",
         font=("Segoe UI", 12, "bold"),

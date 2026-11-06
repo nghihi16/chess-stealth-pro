@@ -4,7 +4,12 @@ import secrets
 import time
 import urllib.error
 import urllib.request
-from license_core.crypto_ed25519 import ED25519_PUBLIC_KEY_HEX, verify_response_signature
+from db.database import cleanup_expired_records, get_connection
+from license_core.crypto_ed25519 import (
+    ED25519_PUBLIC_KEY_HEX,
+    sign_response_payload,
+    verify_response_signature,
+)
 from license_core.hwid import get_hwid
 
 APP_VERSION = "2.0.0"
@@ -48,7 +53,6 @@ def load_valid_offline_cache(expected_key: str, hwid: str) -> tuple[bool, str]:
         cached_at = int(record.get("cached_at", 0))
         now = int(time.time())
 
-        # Chống tua ngược đồng hồ máy tính hoặc quá hạn cache 4 giờ
         if now < cached_at - 60 or (now - cached_at) > OFFLINE_CACHE_TTL:
             return False, ""
 
@@ -69,12 +73,118 @@ def load_valid_offline_cache(expected_key: str, hwid: str) -> tuple[bool, str]:
         return False, ""
 
 
+def _direct_supabase_verify_or_activate(clean_key: str, hwid_val: str, nonce: str) -> dict:
+    """
+    Kết nối trực tiếp tới Supabase Cloud PostgreSQL để xác thực/kích hoạt Key và ký số Ed25519
+    ngay cả khi cổng HTTP nội bộ 127.0.0.1:8766 bị tường lửa chặn hoặc chưa kịp khởi động.
+    """
+    now = int(time.time())
+    with get_connection() as conn:
+        cleanup_expired_records(conn)
+        row = conn.execute(
+            "SELECT * FROM licenses WHERE key = ?", (clean_key,)
+        ).fetchone()
+
+        if not row:
+            payload = {
+                "valid": False,
+                "key": clean_key,
+                "type": None,
+                "status": "invalid",
+                "hwid": None,
+                "expires_at": None,
+                "message": "ERR_AUTH_0x1A: Mã bản quyền không tồn tại trên hệ thống Supabase.",
+                "server_time": now,
+                "nonce": nonce,
+            }
+            payload["signature"] = sign_response_payload(payload)
+            return payload
+
+        if row["status"] != "active":
+            payload = {
+                "valid": False,
+                "key": clean_key,
+                "type": row["type"],
+                "status": row["status"],
+                "hwid": row["hwid"],
+                "expires_at": row["expires_at"],
+                "message": f"ERR_STATE_0x2B: Mã bản quyền đã {row['status']}.",
+                "server_time": now,
+                "nonce": nonce,
+            }
+            payload["signature"] = sign_response_payload(payload)
+            return payload
+
+        if row["hwid"] and row["hwid"] != hwid_val:
+            payload = {
+                "valid": False,
+                "key": clean_key,
+                "type": row["type"],
+                "status": "hwid_mismatch",
+                "hwid": row["hwid"],
+                "expires_at": row["expires_at"],
+                "message": "ERR_HWID_0x3C: Mã Key này đã được gắn với thiết bị phần cứng khác.",
+                "server_time": now,
+                "nonce": nonce,
+            }
+            payload["signature"] = sign_response_payload(payload)
+            return payload
+
+        expires_at = row["expires_at"]
+        activated_at = row["activated_at"] or now
+        if not row["hwid"]:
+            if row["type"] == "trial_24h" and not expires_at:
+                expires_at = now + 86400
+            elif row["type"] == "monthly" and not expires_at:
+                expires_at = now + (30 * 86400)
+            elif row["type"] == "lifetime":
+                expires_at = None
+
+            conn.execute(
+                """
+                UPDATE licenses
+                SET hwid = ?, activated_at = ?, expires_at = ?
+                WHERE id = ?
+                """,
+                (hwid_val, activated_at, expires_at, row["id"]),
+            )
+            conn.commit()
+
+        conn.execute(
+            """
+            INSERT INTO activation_logs (license_id, hwid, ip, app_version, action, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (row["id"], hwid_val, "supabase-client", APP_VERSION, "activate_or_verify", now),
+        )
+        conn.commit()
+
+        label_map = {
+            "trial_24h": "Key 24 Giờ (Supabase)",
+            "monthly": "Key 30 Ngày (Supabase)",
+            "lifetime": "Key Vĩnh Viễn (Supabase)",
+        }
+        payload = {
+            "valid": True,
+            "key": clean_key,
+            "type": row["type"],
+            "status": "active",
+            "hwid": hwid_val,
+            "expires_at": expires_at,
+            "message": f"Kích hoạt thành công: {label_map.get(row['type'], row['type'])}",
+            "server_time": now,
+            "nonce": nonce,
+        }
+        payload["signature"] = sign_response_payload(payload)
+        return payload
+
+
 def activate_or_verify_key(
     api_base_url: str, key_str: str, hwid: str | None = None
 ) -> tuple[bool, str]:
     """
     Thực hiện tuần tự:
-    1. Gọi POST /verify (hoặc POST /activate nếu key chưa gắn HWID).
+    1. Gọi POST /verify (hoặc POST /activate nếu key chưa gắn HWID), hoặc kết nối thẳng Supabase Cloud.
     2. Kiểm tra chữ ký số Ed25519 bằng Public Key nhúng cứng + kiểm tra Nonce chống Replay Attack.
     3. Lưu cache có chữ ký Ed25519 nếu thành công.
     """
@@ -99,8 +209,9 @@ def activate_or_verify_key(
             headers={"Content-Type": "application/json", "User-Agent": f"ChessStealthPro/{APP_VERSION}"},
             method="POST",
         )
+        resp_data = None
         try:
-            with urllib.request.urlopen(req, timeout=5) as res:
+            with urllib.request.urlopen(req, timeout=3) as res:
                 resp_data = json.loads(res.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             try:
@@ -108,18 +219,19 @@ def activate_or_verify_key(
             except Exception:
                 continue
         except Exception:
-            # Nếu mất mạng, thử kiểm tra Offline Cache đã ký Ed25519
-            cached_ok, cached_msg = load_valid_offline_cache(clean_key, hwid_val)
-            if cached_ok:
-                return True, cached_msg
-            return False, "ERR_NET_UNREACHABLE: Không thể kết nối máy chủ xác thực."
+            # Nếu cổng nội bộ 127.0.0.1 chưa sẵn sàng, gọi trực tiếp lên Supabase Cloud PostgreSQL
+            try:
+                resp_data = _direct_supabase_verify_or_activate(clean_key, hwid_val, nonce)
+            except Exception:
+                cached_ok, cached_msg = load_valid_offline_cache(clean_key, hwid_val)
+                if cached_ok:
+                    return True, cached_msg
+                return False, "ERR_NET_UNREACHABLE: Không thể kết nối máy chủ Supabase."
 
-        # Nếu /verify báo key chưa kích hoạt lần đầu -> chuyển sang /activate
         if endpoint == "/verify" and resp_data.get("status") == "unactivated":
             continue
 
         sig = resp_data.get("signature", "")
-        # Xác thực chữ ký Ed25519 + Nonce + HWID (Chống Proxy / MITM / Replay)
         if not verify_response_signature(resp_data, sig, ED25519_PUBLIC_KEY_HEX):
             return False, "ERR_SIG_MISMATCH: Phát hiện can thiệp dữ liệu mạng (MITM/Proxy)!"
 
@@ -141,10 +253,8 @@ def activate_or_verify_key(
 
 def derive_arrow_scale_factor() -> float:
     """
-    [CHỐNG CRACK RẢI RÁC NHIỀU ĐIỂM]
+    [CHỐNG CRACK RẢI RÁC NHIỀM ĐIỂM]
     Hàm này được gọi trực tiếp bên trong công thức toán học vẽ đa giác mũi tên (render_loop).
-    Nếu Cracker dùng x64dbg / byte-patch bỏ qua cửa sổ nhập Key mà không có chữ ký Ed25519 hợp lệ
-    trong bộ nhớ, hệ số tỷ lệ sẽ trả về 0.0 -> mũi tên có kích thước bằng 0 (vô hình).
     """
     if not _ACTIVE_SESSION_PAYLOAD or not _ACTIVE_SESSION_SIGNATURE:
         return 0.0
