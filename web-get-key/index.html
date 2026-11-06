@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Chess Stealth Pro — Cổng Nhận Key 24 Giờ (1 Key = 1 URL)</title>
+  <title>Chess Stealth Pro — Hệ Thống Nhận Key 24 Giờ (2 Checkpoints)</title>
   <style>
     :root[data-theme="dark"] {
       --bg-page: #09090b;
-      --bg-card: rgba(24, 24, 27, 0.92);
+      --bg-card: rgba(24, 24, 27, 0.94);
       --bg-elevated: #27272a;
       --bg-key: #09090b;
       --border-subtle: #3f3f46;
@@ -139,6 +139,11 @@
       margin-bottom: 16px;
     }
 
+    .badge.badge-amber {
+      background: rgba(245, 158, 11, 0.15);
+      color: var(--accent-amber);
+    }
+
     .badge.badge-error {
       background: var(--accent-red-bg);
       color: var(--accent-red);
@@ -155,6 +160,87 @@
       font-size: 14px;
       color: var(--text-secondary);
       margin-bottom: 24px;
+    }
+
+    /* Thanh Tiến Trình 2 Chặng */
+    .stepper {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 24px;
+    }
+
+    .step-item {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+
+    .step-item.active {
+      border-color: var(--accent-amber);
+      color: var(--text-primary);
+      box-shadow: 0 0 12px rgba(245, 158, 11, 0.15);
+    }
+
+    .step-item.done {
+      border-color: var(--accent-green);
+      color: var(--accent-green);
+      background: var(--accent-green-bg);
+    }
+
+    .provider-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 8px;
+      display: block;
+    }
+
+    .provider-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 24px;
+    }
+
+    .provider-btn {
+      min-height: 48px;
+      border-radius: 10px;
+      border: 1px solid var(--border-subtle);
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 8px 12px;
+      transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .provider-btn:hover {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 10px rgba(245, 158, 11, 0.15);
+    }
+
+    .provider-btn.selected {
+      border-color: var(--accent-amber);
+      background: rgba(245, 158, 11, 0.14);
+      color: var(--accent-amber);
+    }
+
+    .provider-btn:focus-visible {
+      outline: 2px solid var(--border-focus);
+      outline-offset: 2px;
     }
 
     .key-box {
@@ -331,6 +417,9 @@
       .key-value {
         font-size: 17px;
       }
+      .stepper, .provider-grid {
+        grid-template-columns: 1fr;
+      }
     }
   </style>
 </head>
@@ -357,13 +446,72 @@
     </button>
   </header>
 
-  <!-- GIAO DIỆN HỢP LỆ: HIỂN THỊ KEY 24H DUY NHẤT -->
-  <main id="valid-view" class="card">
+  <!-- GIAO DIỆN 1: VƯỢT LINK 2 CHẶNG (CHECKPOINT 1/2 & 2/2) -->
+  <main id="checkpoint-view" class="card hidden">
+    <div class="badge badge-amber">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+      </svg>
+      <span id="cp-badge-text">HỆ THỐNG CẤP KEY 2 CHẶNG (0 / 2)</span>
+    </div>
+
+    <h1 id="cp-title">Nhận Key Bản Quyền 24 Giờ</h1>
+    <p id="cp-desc" class="subtitle">
+      Để nhận mã Key 24h miễn phí (đồng bộ trực tiếp với Supabase Cloud), vui lòng hoàn thành đủ 2 chặng vượt link ngắn bên dưới.
+    </p>
+
+    <div class="stepper" aria-label="Tiến trình vượt link">
+      <div id="step-box-1" class="step-item active">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="10"></circle>
+          <polyline points="12 6 12 12 16 14"></polyline>
+        </svg>
+        <span id="step-text-1">Chặng 1 / 2: Chưa hoàn thành</span>
+      </div>
+      <div id="step-box-2" class="step-item">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+        </svg>
+        <span id="step-text-2">Chặng 2 / 2: Nhận Key 24h</span>
+      </div>
+    </div>
+
+    <span class="provider-label">Chọn Cổng Vượt Link:</span>
+    <div class="provider-grid" role="group" aria-label="Chọn nhà cung cấp vượt link">
+      <button id="prov-linkvertise" class="provider-btn selected" type="button">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+          <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+        </svg>
+        <span>Cổng 1: Linkvertise</span>
+      </button>
+      <button id="prov-workink" class="provider-btn" type="button">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+        </svg>
+        <span>Cổng 2: Work.ink</span>
+      </button>
+    </div>
+
+    <div class="actions-stack">
+      <button id="go-step-btn" class="btn-primary" type="button">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+          <polyline points="12 5 19 12 12 19"></polyline>
+        </svg>
+        <span id="go-step-text">TIẾP TỤC VƯỢT CHẶNG 1 (1/2)</span>
+      </button>
+    </div>
+  </main>
+
+  <!-- GIAO DIỆN 2: ĐÃ VƯỢT ĐỦ 2/2 CHẶNG -> HIỂN THỊ KEY 24H DUY NHẤT -->
+  <main id="valid-view" class="card hidden">
     <div class="badge">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <polyline points="20 6 9 17 4 12"></polyline>
       </svg>
-      <span>1 Key = 1 URL Duy Nhất (Đồng bộ Supabase)</span>
+      <span>Hoàn thành 2/2 Chặng — 1 Key = 1 URL Duy Nhất</span>
     </div>
 
     <h1>Mã Key 24 Giờ Của Bạn</h1>
@@ -414,7 +562,7 @@
     </section>
   </main>
 
-  <!-- GIAO DIỆN LỖI 403 / 410 KHI SỬA URL HOẶC HẾT HẠN 24H -->
+  <!-- GIAO DIỆN 3: LỖI 403 / 410 KHI NHẢY CÓC CHẶNG HOẶC SỬA URL -->
   <main id="error-view" class="card hidden" role="alert">
     <div class="badge badge-error">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -422,12 +570,12 @@
         <line x1="12" y1="8" x2="12" y2="12"></line>
         <line x1="12" y1="16" x2="12.01" y2="16"></line>
       </svg>
-      <span id="error-badge-text">LỖI XÁC THỰC URL (403)</span>
+      <span id="error-badge-text">LỖI XÁC THỰC (403)</span>
     </div>
 
-    <h1 id="error-title">Đường Dẫn Nhận Key Không Hợp Lệ</h1>
+    <h1 id="error-title">Đường Dẫn Không Hợp Lệ Hoặc Bỏ Qua Chặng</h1>
     <p id="error-desc" class="subtitle">
-      Mỗi mã Key 24h được gắn cứng với 1 URL duy nhất có chữ ký số. Việc tự ý thay đổi tham số trên thanh địa chỉ hoặc truy cập URL đã quá hạn 24 giờ sẽ bị từ chối.
+      Phát hiện truy cập tắt bỏ qua chặng vượt link hoặc tự ý thay đổi tham số trên thanh địa chỉ. Vui lòng thực hiện tuần tự từ Chặng 1.
     </p>
 
     <div class="actions-stack">
@@ -436,7 +584,7 @@
           <polyline points="23 4 23 10 17 10"></polyline>
           <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
         </svg>
-        <span>QUAY VỀ ĐƯỜNG DẪN HỢP LỆ CỦA BẠN</span>
+        <span>QUAY LẠI CHẶNG ĐẦU TIÊN</span>
       </button>
     </div>
   </main>
@@ -444,7 +592,44 @@
   <script>
     (function () {
       const STORAGE_KEY = 'csp_unique_url_claim_v2';
+      const STEP_STORAGE_KEY = 'csp_checkpoint_progress_v2';
       const SECRET_STR = 'CHESS_STEALTH_PRO_WEB24H_SECRET_2026';
+      const LINKVERTISE_USER_ID = '10578379';
+
+      // Tạo Dynamic Link của Linkvertise (gắn Publisher ID 10578379) hoặc link cố định
+      function buildLinkvertiseUrl(stepNum) {
+        const base = `${window.location.origin}${window.location.pathname}?step=${stepNum}`;
+        const rand = Math.floor(Math.random() * 900 + 100);
+        return `https://link-to.net/${LINKVERTISE_USER_ID}/${rand}/dynamic?r=${btoa(encodeURI(base))}`;
+      }
+
+      const SHORTENER_LINKS = {
+        linkvertise: {
+          step1: null, // Sẽ dùng buildLinkvertiseUrl(1) nếu chưa điền link tĩnh đầy đủ
+          step2: null
+        },
+        workink: {
+          step1: null,
+          step2: null
+        }
+      };
+
+      let selectedProvider = 'linkvertise';
+      let currentTargetStep = 1;
+      let activeClaim = null;
+
+      const checkpointView = document.getElementById('checkpoint-view');
+      const cpBadgeText = document.getElementById('cp-badge-text');
+      const cpTitle = document.getElementById('cp-title');
+      const cpDesc = document.getElementById('cp-desc');
+      const stepBox1 = document.getElementById('step-box-1');
+      const stepBox2 = document.getElementById('step-box-2');
+      const stepText1 = document.getElementById('step-text-1');
+      const stepText2 = document.getElementById('step-text-2');
+      const provLinkvertise = document.getElementById('prov-linkvertise');
+      const provWorkink = document.getElementById('prov-workink');
+      const goStepBtn = document.getElementById('go-step-btn');
+      const goStepText = document.getElementById('go-step-text');
 
       const validView = document.getElementById('valid-view');
       const errorView = document.getElementById('error-view');
@@ -465,6 +650,18 @@
         const html = document.documentElement;
         const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
         html.setAttribute('data-theme', next);
+      });
+
+      provLinkvertise.addEventListener('click', () => {
+        selectedProvider = 'linkvertise';
+        provLinkvertise.classList.add('selected');
+        provWorkink.classList.remove('selected');
+      });
+
+      provWorkink.addEventListener('click', () => {
+        selectedProvider = 'workink';
+        provWorkink.classList.add('selected');
+        provLinkvertise.classList.remove('selected');
       });
 
       async function hmacHex(message) {
@@ -503,6 +700,7 @@
       }
 
       function showErrorState(code, title, desc) {
+        checkpointView.classList.add('hidden');
         validView.classList.add('hidden');
         errorView.classList.remove('hidden');
         errorBadgeText.textContent = `MÃ LỖI ${code}`;
@@ -510,14 +708,68 @@
         errorDesc.textContent = desc;
       }
 
-      let activeClaim = null;
+      function showCheckpointUI(stepDone) {
+        validView.classList.add('hidden');
+        errorView.classList.add('hidden');
+        checkpointView.classList.remove('hidden');
+
+        if (stepDone === 0) {
+          currentTargetStep = 1;
+          cpBadgeText.textContent = 'HỆ THỐNG CẤP KEY 2 CHẶNG (0 / 2)';
+          cpTitle.textContent = 'Vượt Chặng 1 Để Tiếp Tục';
+          cpDesc.textContent = 'Chọn cổng vượt link bạn muốn sử dụng và hoàn thành Chặng 1/2.';
+          stepBox1.className = 'step-item active';
+          stepBox2.className = 'step-item';
+          stepText1.textContent = 'Chặng 1 / 2: Đang chờ vượt';
+          stepText2.textContent = 'Chặng 2 / 2: Khóa';
+          goStepText.textContent = 'BẮT ĐẦU VƯỢT CHẶNG 1 (1/2)';
+        } else {
+          currentTargetStep = 2;
+          cpBadgeText.textContent = 'ĐÃ HOÀN THÀNH CHẶNG 1 (1 / 2)';
+          cpTitle.textContent = 'Chặng Cuối Cùng (2 / 2)';
+          cpDesc.textContent = 'Bạn đã vượt xong Chặng 1! Hãy vượt nốt Chặng 2 để hệ thống mở khóa Mã Key 24 Giờ.';
+          stepBox1.className = 'step-item done';
+          stepBox2.className = 'step-item active';
+          stepText1.textContent = 'Chặng 1 / 2: Đã hoàn thành';
+          stepText2.textContent = 'Chặng 2 / 2: Sẵn sàng mở khóa';
+          goStepText.textContent = 'TIẾP TỤC VƯỢT CHẶNG 2 (NHẬN KEY)';
+        }
+      }
+
+      function renderValidKey(claim) {
+        activeClaim = claim;
+        checkpointView.classList.add('hidden');
+        errorView.classList.add('hidden');
+        validView.classList.remove('hidden');
+        keyDisplay.textContent = claim.licenseKey;
+        uniqueUrlText.textContent = `${window.location.origin}${window.location.pathname}?token=${claim.urlToken}`;
+        openAppBtn.href = `chesspro://activate?key=${encodeURIComponent(claim.licenseKey)}`;
+      }
+
+      goStepBtn.addEventListener('click', () => {
+        const nowSec = Math.floor(Date.now() / 1000);
+        try {
+          const prev = JSON.parse(localStorage.getItem(STEP_STORAGE_KEY) || '{}');
+          prev.expectedStep = currentTargetStep;
+          prev.startedAt = nowSec;
+          localStorage.setItem(STEP_STORAGE_KEY, JSON.stringify(prev));
+        } catch (_) {}
+
+        const provLinks = SHORTENER_LINKS[selectedProvider] || SHORTENER_LINKS.linkvertise;
+        let dest = currentTargetStep === 1 ? provLinks.step1 : provLinks.step2;
+        if (!dest) {
+          dest = buildLinkvertiseUrl(currentTargetStep);
+        }
+        window.location.href = dest;
+      });
 
       async function initPage() {
         const nowSec = Math.floor(Date.now() / 1000);
         const params = new URLSearchParams(window.location.search);
         const urlTokenParam = params.get('token');
+        const stepParam = params.get('step');
 
-        // 1. Kiểm tra cache 24h trong trình duyệt (chống tạo key mới khi F5 hoặc mở lại trang đích)
+        // 1. Kiểm tra nếu đã có Key 24h hợp lệ trong 24h qua
         let savedClaim = null;
         try {
           const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
@@ -528,7 +780,7 @@
           }
         } catch (_) {}
 
-        // 2. Nếu trên thanh địa chỉ ĐÃ CÓ ?token=... -> Bắt buộc kiểm tra chữ ký số của URL
+        // 2. Nếu truy cập bằng ?token=... (1 Key = 1 URL duy nhất)
         if (urlTokenParam) {
           const parts = urlTokenParam.trim().toUpperCase().split('-');
           if (parts.length !== 3 || parts[0].length !== 6 || parts[1].length !== 8 || parts[2].length !== 10) {
@@ -542,13 +794,8 @@
 
           const [tId, expHex, providedSig] = parts;
           const expSec = parseInt(expHex, 16);
-          if (isNaN(expSec)) {
-            showErrorState(403, 'Tham Số Thời Gian Lỗi', 'Đường dẫn chứa tham số thời gian không hợp lệ.');
-            return;
-          }
-
           const expectedUrlSig = (await hmacHex(`URL:${tId}:${expHex}`)).slice(0, 10);
-          if (providedSig !== expectedUrlSig) {
+          if (isNaN(expSec) || providedSig !== expectedUrlSig) {
             showErrorState(
               403,
               'Phát Hiện Thay Đổi Đường Dẫn URL',
@@ -567,36 +814,72 @@
             return;
           }
 
-          activeClaim = await buildTokenAndKey(tId, expSec);
-          try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(activeClaim));
-          } catch (_) {}
-        } else {
-          // 3. Nếu vừa vượt link tới trang gốc (chưa có ?token=...)
-          if (savedClaim) {
-            activeClaim = savedClaim;
-          } else {
-            const newId = randomHex6();
-            const newExp = nowSec + 86400;
-            activeClaim = await buildTokenAndKey(newId, newExp);
-            try {
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(activeClaim));
-            } catch (_) {}
-          }
-          // Khóa cứng URL trên thanh địa chỉ thành ?token=<DUY_NHẤT> để F5 không tạo key mới
-          const newUrl = `${window.location.pathname}?token=${activeClaim.urlToken}`;
-          window.history.replaceState({ token: activeClaim.urlToken }, '', newUrl);
+          const verifiedClaim = await buildTokenAndKey(tId, expSec);
+          renderValidKey(verifiedClaim);
+          return;
         }
 
-        // Hiển thị thông tin Key & URL duy nhất
-        validView.classList.remove('hidden');
-        errorView.classList.add('hidden');
-        keyDisplay.textContent = activeClaim.licenseKey;
-        uniqueUrlText.textContent = `${window.location.origin}${window.location.pathname}?token=${activeClaim.urlToken}`;
-        openAppBtn.href = `chesspro://activate?key=${encodeURIComponent(activeClaim.licenseKey)}`;
+        // 3. Xử lý khi người dùng quay về từ Link Rút Gọn (?step=1 hoặc ?step=2)
+        let stepState = {};
+        try {
+          stepState = JSON.parse(localStorage.getItem(STEP_STORAGE_KEY) || '{}');
+        } catch (_) {}
+
+        if (stepParam === '1') {
+          stepState.step1Completed = true;
+          stepState.step1Time = nowSec;
+          try {
+            localStorage.setItem(STEP_STORAGE_KEY, JSON.stringify(stepState));
+          } catch (_) {}
+          window.history.replaceState({}, '', window.location.pathname);
+          showCheckpointUI(1);
+          return;
+        }
+
+        if (stepParam === '2') {
+          // Chặn nhảy cóc: Bắt buộc phải hoàn thành Chặng 1 trong vòng 2 giờ trước đó
+          if (!stepState.step1Completed || (nowSec - (stepState.step1Time || 0)) > 7200) {
+            showErrorState(
+              403,
+              'Phát Hiện Bỏ Qua Chặng 1!',
+              'Bạn chưa hoàn thành Chặng 1/2 mà đã truy cập thẳng vào Chặng 2. Vui lòng vượt tuần tự từ Chặng 1.'
+            );
+            return;
+          }
+
+          // Hoàn thành đủ 2/2 chặng -> Cấp Key 24h & Khóa URL duy nhất
+          localStorage.removeItem(STEP_STORAGE_KEY);
+          if (!savedClaim) {
+            const newId = randomHex6();
+            const newExp = nowSec + 86400;
+            savedClaim = await buildTokenAndKey(newId, newExp);
+            try {
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(savedClaim));
+            } catch (_) {}
+          }
+          const newUrl = `${window.location.pathname}?token=${savedClaim.urlToken}`;
+          window.history.replaceState({ token: savedClaim.urlToken }, '', newUrl);
+          renderValidKey(savedClaim);
+          return;
+        }
+
+        // 4. Mở trang gốc: Nếu đã có Key 24h còn hạn thì hiện luôn, nếu chưa thì hiện Chặng hiện tại
+        if (savedClaim) {
+          const newUrl = `${window.location.pathname}?token=${savedClaim.urlToken}`;
+          window.history.replaceState({ token: savedClaim.urlToken }, '', newUrl);
+          renderValidKey(savedClaim);
+          return;
+        }
+
+        if (stepState.step1Completed && (nowSec - (stepState.step1Time || 0)) <= 7200) {
+          showCheckpointUI(1);
+        } else {
+          showCheckpointUI(0);
+        }
       }
 
       resetClaimBtn.addEventListener('click', () => {
+        try { localStorage.removeItem(STEP_STORAGE_KEY); } catch (_) {}
         window.location.href = window.location.pathname;
       });
 
