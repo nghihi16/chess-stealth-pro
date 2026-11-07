@@ -11,9 +11,10 @@ import time
 import urllib.parse
 
 from PySide6.QtCore import QByteArray, QPointF, QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap, QPolygonF
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap, QPolygonF
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -52,6 +53,14 @@ WS_EX_LAYERED = 0x00080000
 WS_EX_TRANSPARENT = 0x00000020
 WS_EX_TOOLWINDOW = 0x00000080
 
+COLOR_PRESETS = {
+    "Orange (Classic)": QColor(245, 158, 11, 230),
+    "Cyan (Stealth)": QColor(34, 211, 238, 230),
+    "Emerald (Green)": QColor(16, 185, 129, 230),
+    "Crimson (Red)": QColor(239, 68, 68, 230),
+    "Gold (Yellow)": QColor(234, 179, 8, 230),
+}
+
 arrow_state = {
     "x1": 0,
     "y1": 0,
@@ -59,17 +68,24 @@ arrow_state = {
     "y2": 0,
     "size": 60,
     "show": False,
+    "enabled": True,
+    "side": "auto",
+    "move": "",
+    "depth": "",
     "last_seen": 0.0,
     "offset_y": 0,
+    "qcolor": QColor(245, 158, 11, 230),
 }
 
 _ACTIVE_WINDOWS = []
 _CURRENT_THEME = "dark"
+_OVERLAY_INSTANCE = None
 
-# ================= IN-BROWSER GUI + STEALTH OVERLAY BRIDGE =================
-STEALTH_USERSCRIPT_CODE = (
-    r"""// ==UserScript==
-// @name         Chess Stealth Pro — In-Browser GUI & Stealth Bridge
+# ================= 100% PURE ZERO-DOM STEALTH SCRIPT (ZERO IN-PAGE ELEMENTS) =================
+# CHỐNG ANTI-CHEAT TUYỆT ĐỐI: Không chèn bất kỳ thẻ HTML, SVG hay CSS nào vào DOM của Chess.com.
+# Toàn bộ việc vẽ mũi tên được xử lý bởi Windows Stealth Overlay phía ngoài màn hình.
+STEALTH_USERSCRIPT_CODE = r"""// ==UserScript==
+// @name         Chess.com Pure Zero-DOM Stealth Engine
 // @match        *://www.chess.com/*
 // @match        *://chess.com/*
 // @run-at       document-end
@@ -78,477 +94,276 @@ STEALTH_USERSCRIPT_CODE = (
 (function () {
   'use strict';
 
-  const PAWN_LOGO_DATA_URI = """
-    + json.dumps(LOGOS["pawn"])
-    + r""";
+  if (window.__CHESS_STEALTH_CORE_RUNNING__) return;
+  window.__CHESS_STEALTH_CORE_RUNNING__ = true;
 
-  function initChessStealth() {
-    if (document.getElementById('ca-panel-container')) return;
-    if (!document.body) {
-      setTimeout(initChessStealth, 100);
+  let isEnabled = true;
+  let manualSide = 'auto';
+  let stockfishWorker = null;
+  let lastBoardKey = '';
+  let currentBestMove = null;
+  let currentDepth = '';
+  let draggedPieceInfo = null;
+
+  let exactOffsetX = null;
+  let exactOffsetY = null;
+  let lastWinX = window.screenX;
+  let lastWinY = window.screenY;
+  let lastInnerW = window.innerWidth;
+  let lastInnerH = window.innerHeight;
+
+  function updateCalibration(e) {
+    if (typeof e.screenX === 'number' && typeof e.clientX === 'number') {
+      exactOffsetX = e.screenX - e.clientX;
+      exactOffsetY = e.screenY - e.clientY;
+      lastWinX = window.screenX;
+      lastWinY = window.screenY;
+      lastInnerW = window.innerWidth;
+      lastInnerH = window.innerHeight;
+    }
+  }
+
+  window.addEventListener('pointermove', updateCalibration, { passive: true, capture: true });
+  window.addEventListener('mousemove', updateCalibration, { passive: true, capture: true });
+  window.addEventListener('pointerdown', updateCalibration, { passive: true, capture: true });
+
+  function sendToOverlay(payload) {
+    fetch('http://127.0.0.1:8765/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      mode: 'cors'
+    }).then(r => r.json()).then(data => {
+      if (data && typeof data.enabled === 'boolean') {
+        isEnabled = data.enabled;
+      }
+      if (data && data.side) {
+        manualSide = data.side;
+      }
+    }).catch(() => {
+      const q = payload.show
+        ? `s=1&x1=${payload.x1}&y1=${payload.y1}&x2=${payload.x2}&y2=${payload.y2}&sz=${payload.size}&m=${payload.move || ''}&d=${payload.depth || ''}&t=${Date.now()}`
+        : `s=0&t=${Date.now()}`;
+      const img = new Image();
+      img.src = `http://127.0.0.1:8765/u?${q}`;
+    });
+  }
+
+  function updateOverlayCoords(boardEl, move, depth) {
+    if (!isEnabled || document.hidden || !boardEl || !move || move.length < 4) {
+      sendToOverlay({ show: false });
       return;
     }
 
-    let isEnabled = true;
-    let isMinimized = false;
-    let isPanelHidden = false;
-    let stockfishWorker = null;
-    let lastBoardKey = '';
-    let currentBestMove = null;
-    let draggedPieceInfo = null;
-
-    let exactOffsetX = null;
-    let exactOffsetY = null;
-    let lastWinX = window.screenX;
-    let lastWinY = window.screenY;
-    let lastInnerW = window.innerWidth;
-    let lastInnerH = window.innerHeight;
-
-    function updateCalibration(e) {
-      if (typeof e.screenX === 'number' && typeof e.clientX === 'number') {
-        exactOffsetX = e.screenX - e.clientX;
-        exactOffsetY = e.screenY - e.clientY;
-        lastWinX = window.screenX;
-        lastWinY = window.screenY;
-        lastInnerW = window.innerWidth;
-        lastInnerH = window.innerHeight;
-      }
-    }
-
-    window.addEventListener('pointermove', updateCalibration, { passive: true, capture: true });
-    window.addEventListener('mousemove', updateCalibration, { passive: true, capture: true });
-    window.addEventListener('pointerdown', updateCalibration, { passive: true, capture: true });
-
-    // Floating GUI Panel on Browser (Bottom-Right)
-    const panel = document.createElement('div');
-    panel.id = 'ca-panel-container';
-    panel.style.cssText = `
-      position: fixed; bottom: 20px; right: 20px; z-index: 2147483647;
-      background: rgba(11, 15, 25, 0.94); backdrop-filter: blur(14px);
-      color: #f8fafc; padding: 12px 14px; border-radius: 14px;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      box-shadow: 0 12px 32px rgba(0,0,0,0.75), 0 0 18px rgba(34,211,238,0.18);
-      border: 1px solid rgba(34, 211, 238, 0.35); width: 248px;
-      user-select: none; transition: all 0.2s ease;
-    `;
-    panel.innerHTML = `
-      <div style="display:flex; justify-content:space-between; align-items:center;">
-        <div style="display:flex; align-items:center; gap:8px;">
-          <img src="${PAWN_LOGO_DATA_URI}" style="width:28px; height:28px; object-fit:contain; filter:drop-shadow(0 0 8px rgba(34,211,238,0.7));" alt="" />
-          <div style="display:flex; flex-direction:column; line-height:1.1;">
-            <span style="font-weight:800; color:#f8fafc; font-size:12px; letter-spacing:0.16em;">CHESS</span>
-            <span style="font-weight:800; color:#22d3ee; font-size:9px; letter-spacing:0.24em;">STEALTH</span>
-          </div>
-        </div>
-        <div style="display:flex; align-items:center; gap:6px;">
-          <button id="ca-toggle-btn" style="background:#10b981; color:#060911; border:none; padding:4px 10px; border-radius:6px; font-size:11px; font-weight:800; cursor:pointer;">
-            ON
-          </button>
-          <button id="ca-min-btn" style="background:#1e293b; color:#cbd5e1; border:1px solid #334155; padding:3px 8px; border-radius:6px; font-size:11px; font-weight:700; cursor:pointer;" title="Minimize">
-            _
-          </button>
-        </div>
-      </div>
-
-      <div id="ca-body" style="margin-top:10px; border-top:1px solid rgba(148,163,184,0.18); padding-top:10px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font-size:12px; color:#cbd5e1;">
-          <span>Side:</span>
-          <select id="ca-my-color" style="background:#161e2e; color:#f8fafc; border:1px solid #334155; padding:4px 8px; border-radius:6px; font-size:11px; font-weight:600; outline:none;">
-            <option value="auto" selected>Auto (Board View)</option>
-            <option value="w">White</option>
-            <option value="b">Black</option>
-          </select>
-        </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font-size:12px; color:#cbd5e1;">
-          <span>Arrow:</span>
-          <select id="ca-arrow-color" style="background:#161e2e; color:#f8fafc; border:1px solid #334155; padding:4px 8px; border-radius:6px; font-size:11px; font-weight:600; outline:none;">
-            <option value="rgba(255, 170, 0, 0.88)" selected>Orange</option>
-            <option value="rgba(34, 211, 238, 0.88)">Cyan</option>
-            <option value="rgba(52, 211, 153, 0.88)">Green</option>
-            <option value="rgba(248, 113, 113, 0.88)">Red</option>
-            <option value="transparent">Stealth Overlay Only</option>
-          </select>
-        </div>
-        <div id="ca-status" style="font-size:12px; color:#34d399; font-weight:700; margin-top:6px; display:flex; justify-content:space-between; align-items:center;">
-          <span>Ready (Alt+X)</span>
-        </div>
-      </div>
-    `;
-    document.body.appendChild(panel);
-
-    function updateStatus(html) {
-      const el = document.getElementById('ca-status');
-      if (el) el.innerHTML = html;
-    }
-
-    function sendToOverlay(payload) {
-      const body = JSON.stringify(payload);
-      if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
-        try {
-          chrome.runtime.sendMessage({ type: 'OVERLAY_UPDATE', payload });
-        } catch (_) {}
-      }
-      fetch('http://127.0.0.1:8765/update', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: body,
-        mode: 'cors'
-      }).catch(() => {
-        const q = payload.show
-          ? `s=1&x1=${payload.x1}&y1=${payload.y1}&x2=${payload.x2}&y2=${payload.y2}&sz=${payload.size}&t=${Date.now()}`
-          : `s=0&t=${Date.now()}`;
-        const img = new Image();
-        img.src = `http://127.0.0.1:8765/u?${q}`;
-      });
-    }
-
-    function clearArrow() {
-      const oldSvg = document.getElementById('ca-arrow-overlay');
-      if (oldSvg) oldSvg.remove();
-    }
-
-    function drawChessComArrow(boardEl, move) {
-      if (!isEnabled || !boardEl || !move || move.length < 4) return;
-      const arrowColor = document.getElementById('ca-arrow-color')?.value || 'rgba(255, 170, 0, 0.88)';
-      if (arrowColor === 'transparent') {
-        clearArrow();
-        return;
-      }
-
-      let svg = document.getElementById('ca-arrow-overlay');
-      if (!svg || !boardEl.contains(svg)) {
-        clearArrow();
-        svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        svg.id = 'ca-arrow-overlay';
-        svg.setAttribute('viewBox', '0 0 100 100');
-        svg.style.cssText = 'position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:999;';
-        boardEl.appendChild(svg);
-      }
-
-      const isFlipped = boardEl.classList.contains('flipped') || boardEl.classList.contains('board-flipped');
-      function toCoords(sq) {
-        const file = sq.charCodeAt(0) - 97;
-        const rank = parseInt(sq[1], 10) - 1;
-        const x = isFlipped ? (7 - file) + 0.5 : file + 0.5;
-        const y = isFlipped ? rank + 0.5 : (7 - rank) + 0.5;
-        return { x: x * 12.5, y: y * 12.5 };
-      }
-
-      const from = toCoords(move.substring(0, 2));
-      const to = toCoords(move.substring(2, 4));
-      const dx = to.x - from.x;
-      const dy = to.y - from.y;
-      const len = Math.hypot(dx, dy);
-      if (len === 0) return;
-
-      const ux = dx / len, uy = dy / len;
-      const px = -uy, py = ux;
-
-      const shaftWidth = 2.75;
-      const headWidth = 6.2;
-      const headLength = 4.8;
-      const startOffset = 1.5;
-
-      const startX = from.x + ux * startOffset;
-      const startY = from.y + uy * startOffset;
-      const neckX = to.x - ux * headLength;
-      const neckY = to.y - uy * headLength;
-
-      const p1 = `${startX + px * (shaftWidth / 2)},${startY + py * (shaftWidth / 2)}`;
-      const p2 = `${neckX + px * (shaftWidth / 2)},${neckY + py * (shaftWidth / 2)}`;
-      const p3 = `${neckX + px * (headWidth / 2)},${neckY + py * (headWidth / 2)}`;
-      const p4 = `${to.x},${to.y}`;
-      const p5 = `${neckX - px * (headWidth / 2)},${neckY - py * (headWidth / 2)}`;
-      const p6 = `${neckX - px * (shaftWidth / 2)},${neckY - py * (shaftWidth / 2)}`;
-      const p7 = `${startX - px * (shaftWidth / 2)},${startY - py * (shaftWidth / 2)}`;
-
-      svg.innerHTML = `<polygon points="${p1} ${p2} ${p3} ${p4} ${p5} ${p6} ${p7}" fill="${arrowColor}" />`;
-    }
-
-    function updateOverlayCoords(boardEl, move) {
-      if (!isEnabled || document.hidden || !boardEl || !move || move.length < 4) {
-        sendToOverlay({ show: false });
-        return;
-      }
-
-      drawChessComArrow(boardEl, move);
-
-      const rect = boardEl.getBoundingClientRect();
-      if (rect.width < 40 || rect.height < 40) {
-        sendToOverlay({ show: false });
-        return;
-      }
-
-      if (
-        window.screenX !== lastWinX ||
-        window.screenY !== lastWinY ||
-        window.innerWidth !== lastInnerW ||
-        window.innerHeight !== lastInnerH
-      ) {
-        exactOffsetX = null;
-        exactOffsetY = null;
-      }
-
-      let screenOffsetX, screenOffsetY;
-      if (exactOffsetX !== null && exactOffsetY !== null) {
-        screenOffsetX = exactOffsetX;
-        screenOffsetY = exactOffsetY;
-      } else {
-        const borderOffsetX = Math.max(0, (window.outerWidth - window.innerWidth) / 2);
-        const chromeHeight = Math.max(0, window.outerHeight - window.innerHeight - borderOffsetX);
-        screenOffsetX = window.screenX + borderOffsetX;
-        screenOffsetY = window.screenY + chromeHeight;
-      }
-
-      const isFlipped = boardEl.classList.contains('flipped') || boardEl.classList.contains('board-flipped');
-      const sqSize = rect.width / 8;
-
-      function sqToScreen(sq) {
-        const file = sq.charCodeAt(0) - 97;
-        const rank = parseInt(sq[1], 10) - 1;
-        const col = isFlipped ? (7 - file) : file;
-        const row = isFlipped ? rank : (7 - rank);
-
-        return {
-          x: Math.round(screenOffsetX + rect.left + (col + 0.5) * sqSize),
-          y: Math.round(screenOffsetY + rect.top + (row + 0.5) * sqSize)
-        };
-      }
-
-      const from = sqToScreen(move.substring(0, 2));
-      const to = sqToScreen(move.substring(2, 4));
-
-      sendToOverlay({
-        show: true,
-        x1: from.x,
-        y1: from.y,
-        x2: to.x,
-        y2: to.y,
-        size: Math.round(sqSize),
-        move: move
-      });
-    }
-
-    function setupEngine() {
-      try {
-        const workerCode = `importScripts('https://cdnjs.cloudflare.com/ajax/libs/stockfish.js/10.0.2/stockfish.js');`;
-        const blob = new Blob([workerCode], { type: 'application/javascript' });
-        stockfishWorker = new Worker(URL.createObjectURL(blob));
-
-        stockfishWorker.onmessage = function (event) {
-          if (!isEnabled) return;
-          const line = typeof event.data === 'string' ? event.data : '';
-
-          if (line.startsWith('info') && line.includes(' pv ')) {
-            const pvMatch = line.match(/ pv ([a-h][1-8][a-h][1-8][qrbn]?)/);
-            const depthMatch = line.match(/depth (\d+)/);
-            if (pvMatch && pvMatch[1]) {
-              currentBestMove = pvMatch[1];
-              const depth = depthMatch ? depthMatch[1] : '?';
-              const boardEl = document.querySelector('wc-chess-board, .board');
-              if (boardEl) {
-                updateOverlayCoords(boardEl, currentBestMove);
-                updateStatus(`<span style="color:#22d3ee; font-size:13px;">${currentBestMove.substring(0, 2).toUpperCase()} &rarr; ${currentBestMove.substring(2, 4).toUpperCase()}</span> <span style="font-size:11px; color:#94a3b8;">Depth ${depth}</span>`);
-              }
-            }
-          }
-
-          if (line.startsWith('bestmove')) {
-            const move = line.split(' ')[1];
-            if (move && move !== '(none)' && move.length >= 4) {
-              currentBestMove = move;
-              const boardEl = document.querySelector('wc-chess-board, .board');
-              if (boardEl) {
-                updateOverlayCoords(boardEl, currentBestMove);
-                updateStatus(`<span style="color:#34d399; font-size:13px;">${move.substring(0, 2).toUpperCase()} &rarr; ${move.substring(2, 4).toUpperCase()}</span> <span style="font-size:11px; color:#10b981;">Best</span>`);
-              }
-            }
-          }
-        };
-
-        stockfishWorker.postMessage('uci');
-        stockfishWorker.postMessage('setoption name Skill Level value 20');
-        stockfishWorker.postMessage('isready');
-      } catch (_) {}
-    }
-
-    setupEngine();
-
-    function toggleAssistant() {
-      isEnabled = !isEnabled;
-      const btn = document.getElementById('ca-toggle-btn');
-      if (isEnabled) {
-        btn.innerText = 'ON';
-        btn.style.background = '#10b981';
-        btn.style.color = '#060911';
-        lastBoardKey = '';
-        updateStatus('Active');
-      } else {
-        btn.innerText = 'OFF';
-        btn.style.background = '#ef4444';
-        btn.style.color = '#ffffff';
-        if (stockfishWorker) stockfishWorker.postMessage('stop');
-        currentBestMove = null;
-        clearArrow();
-        sendToOverlay({ show: false });
-        updateStatus('<span style="color:#94a3b8;">Paused</span>');
-      }
-    }
-
-    document.getElementById('ca-toggle-btn').addEventListener('click', toggleAssistant);
-
-    document.getElementById('ca-min-btn').addEventListener('click', () => {
-      isMinimized = !isMinimized;
-      const bodyEl = document.getElementById('ca-body');
-      const minBtn = document.getElementById('ca-min-btn');
-      if (isMinimized) {
-        bodyEl.style.display = 'none';
-        minBtn.innerText = '+';
-        panel.style.width = '205px';
-      } else {
-        bodyEl.style.display = 'block';
-        minBtn.innerText = '_';
-        panel.style.width = '248px';
-      }
-    });
-
-    document.getElementById('ca-arrow-color').addEventListener('change', () => {
-      const boardEl = document.querySelector('wc-chess-board, .board');
-      if (boardEl && currentBestMove) drawChessComArrow(boardEl, currentBestMove);
-    });
-
-    document.getElementById('ca-my-color').addEventListener('change', () => {
-      lastBoardKey = '';
-    });
-
-    window.addEventListener('keydown', (e) => {
-      if (e.altKey && e.key.toLowerCase() === 'x') {
-        toggleAssistant();
-      } else if (e.altKey && e.key.toLowerCase() === 'h') {
-        isPanelHidden = !isPanelHidden;
-        panel.style.display = isPanelHidden ? 'none' : 'block';
-      }
-    });
-
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) sendToOverlay({ show: false });
-      else lastBoardKey = '';
-    });
-
-    window.addEventListener('beforeunload', () => {
+    const rect = boardEl.getBoundingClientRect();
+    if (rect.width < 40 || rect.height < 40) {
       sendToOverlay({ show: false });
-    });
+      return;
+    }
 
-    document.addEventListener('pointerdown', (e) => {
-      const pieceEl = e.target.closest('.piece');
-      if (pieceEl) {
-        const classes = Array.from(pieceEl.classList);
-        let type = null, sq = null;
-        for (const c of classes) {
-          if (/^[wb][prnbqk]$/.test(c)) type = c;
-          if (/^square-\d\d$/.test(c)) sq = c.split('-')[1];
-        }
-        if (type && sq) draggedPieceInfo = { type, sq };
-      }
-    }, true);
+    if (
+      window.screenX !== lastWinX ||
+      window.screenY !== lastWinY ||
+      window.innerWidth !== lastInnerW ||
+      window.innerHeight !== lastInnerH
+    ) {
+      exactOffsetX = null;
+      exactOffsetY = null;
+    }
 
-    document.addEventListener('pointerup', () => {
-      draggedPieceInfo = null;
-    }, true);
+    let screenOffsetX, screenOffsetY;
+    if (exactOffsetX !== null && exactOffsetY !== null) {
+      screenOffsetX = exactOffsetX;
+      screenOffsetY = exactOffsetY;
+    } else {
+      const borderOffsetX = Math.max(0, (window.outerWidth - window.innerWidth) / 2);
+      const chromeHeight = Math.max(0, window.outerHeight - window.innerHeight - borderOffsetX);
+      screenOffsetX = window.screenX + borderOffsetX;
+      screenOffsetY = window.screenY + chromeHeight;
+    }
 
-    function extractBoard() {
-      const boardEl = document.querySelector('wc-chess-board, .board');
-      if (!boardEl) return null;
+    const isFlipped = boardEl.classList.contains('flipped') || boardEl.classList.contains('board-flipped');
+    const sqSize = rect.width / 8;
 
-      const grid = Array(8).fill(null).map(() => Array(8).fill(''));
-      const pieces = boardEl.querySelectorAll('.piece');
-      if (pieces.length === 0) return null;
-
-      let whiteKing = false, blackKing = false;
-
-      pieces.forEach(p => {
-        const classes = Array.from(p.classList);
-        if (classes.includes('animating')) return;
-
-        let type = null, sq = null;
-        for (const c of classes) {
-          if (/^[wb][prnbqk]$/.test(c)) type = c;
-          if (/^square-\d\d$/.test(c)) sq = c.split('-')[1];
-        }
-
-        if (classes.includes('dragging') && !sq && draggedPieceInfo) {
-          type = draggedPieceInfo.type;
-          sq = draggedPieceInfo.sq;
-        }
-
-        if (type && sq) {
-          const col = parseInt(sq[0], 10) - 1;
-          const row = 8 - parseInt(sq[1], 10);
-          if (row >= 0 && row < 8 && col >= 0 && col < 8) {
-            const char = type[0] === 'w' ? type[1].toUpperCase() : type[1].toLowerCase();
-            grid[row][col] = char;
-            if (char === 'K') whiteKing = true;
-            if (char === 'k') blackKing = true;
-          }
-        }
-      });
-
-      if (!whiteKing || !blackKing) return null;
-
-      const fenRows = grid.map(row => {
-        let empty = 0, str = '';
-        row.forEach(cell => {
-          if (cell === '') empty++;
-          else {
-            if (empty > 0) { str += empty; empty = 0; }
-            str += cell;
-          }
-        });
-        if (empty > 0) str += empty;
-        return str;
-      });
-
-      const isFlipped = boardEl.classList.contains('flipped') || boardEl.classList.contains('board-flipped');
-      const manualSide = document.getElementById('ca-my-color')?.value || 'auto';
-      const mySide = manualSide !== 'auto' ? manualSide : (isFlipped ? 'b' : 'w');
-      const boardPart = fenRows.join('/');
+    function sqToScreen(sq) {
+      const file = sq.charCodeAt(0) - 97;
+      const rank = parseInt(sq[1], 10) - 1;
+      const col = isFlipped ? (7 - file) : file;
+      const row = isFlipped ? rank : (7 - rank);
 
       return {
-        boardEl,
-        mySide,
-        boardPart,
-        fen: `${boardPart} ${mySide} KQkq - 0 1`
+        x: Math.round(screenOffsetX + rect.left + (col + 0.5) * sqSize),
+        y: Math.round(screenOffsetY + rect.top + (row + 0.5) * sqSize)
       };
     }
 
-    setInterval(() => {
-      if (!isEnabled || !stockfishWorker || document.hidden) return;
+    const from = sqToScreen(move.substring(0, 2));
+    const to = sqToScreen(move.substring(2, 4));
 
-      const state = extractBoard();
-      if (!state) {
-        sendToOverlay({ show: false });
-        return;
-      }
-
-      if (currentBestMove) {
-        updateOverlayCoords(state.boardEl, currentBestMove);
-      }
-
-      const currentKey = `${state.boardPart}_${state.mySide}`;
-      if (currentKey === lastBoardKey) return;
-
-      lastBoardKey = currentKey;
-      stockfishWorker.postMessage('stop');
-      stockfishWorker.postMessage('position fen ' + state.fen);
-      stockfishWorker.postMessage('go depth 13 movetime 180');
-    }, 25);
+    sendToOverlay({
+      show: true,
+      x1: from.x,
+      y1: from.y,
+      x2: to.x,
+      y2: to.y,
+      size: Math.round(sqSize),
+      move: move,
+      depth: depth || ''
+    });
   }
 
-  if (document.body) initChessStealth();
-  else window.addEventListener('DOMContentLoaded', initChessStealth);
+  function setupEngine() {
+    try {
+      const workerCode = `importScripts('https://cdnjs.cloudflare.com/ajax/libs/stockfish.js/10.0.2/stockfish.js');`;
+      const blob = new Blob([workerCode], { type: 'application/javascript' });
+      stockfishWorker = new Worker(URL.createObjectURL(blob));
+
+      stockfishWorker.onmessage = function (event) {
+        if (!isEnabled) return;
+        const line = typeof event.data === 'string' ? event.data : '';
+
+        if (line.startsWith('info') && line.includes(' pv ')) {
+          const pvMatch = line.match(/ pv ([a-h][1-8][a-h][1-8][qrbn]?)/);
+          const depthMatch = line.match(/depth (\d+)/);
+          if (pvMatch && pvMatch[1]) {
+            currentBestMove = pvMatch[1];
+            currentDepth = depthMatch ? depthMatch[1] : '';
+            const boardEl = document.querySelector('wc-chess-board, .board');
+            if (boardEl) updateOverlayCoords(boardEl, currentBestMove, currentDepth);
+          }
+        }
+
+        if (line.startsWith('bestmove')) {
+          const move = line.split(' ')[1];
+          if (move && move !== '(none)' && move.length >= 4) {
+            currentBestMove = move;
+            const boardEl = document.querySelector('wc-chess-board, .board');
+            if (boardEl) updateOverlayCoords(boardEl, currentBestMove, currentDepth);
+          }
+        }
+      };
+
+      stockfishWorker.postMessage('uci');
+      stockfishWorker.postMessage('setoption name Skill Level value 20');
+      stockfishWorker.postMessage('isready');
+    } catch (_) {}
+  }
+
+  setupEngine();
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) sendToOverlay({ show: false });
+    else lastBoardKey = '';
+  });
+
+  window.addEventListener('beforeunload', () => {
+    sendToOverlay({ show: false });
+  });
+
+  document.addEventListener('pointerdown', (e) => {
+    const pieceEl = e.target.closest('.piece');
+    if (pieceEl) {
+      const classes = Array.from(pieceEl.classList);
+      let type = null, sq = null;
+      for (const c of classes) {
+        if (/^[wb][prnbqk]$/.test(c)) type = c;
+        if (/^square-\d\d$/.test(c)) sq = c.split('-')[1];
+      }
+      if (type && sq) draggedPieceInfo = { type, sq };
+    }
+  }, true);
+
+  document.addEventListener('pointerup', () => {
+    draggedPieceInfo = null;
+  }, true);
+
+  function extractBoard() {
+    const boardEl = document.querySelector('wc-chess-board, .board');
+    if (!boardEl) return null;
+
+    const grid = Array(8).fill(null).map(() => Array(8).fill(''));
+    const pieces = boardEl.querySelectorAll('.piece');
+    if (pieces.length === 0) return null;
+
+    let whiteKing = false, blackKing = false;
+
+    pieces.forEach(p => {
+      const classes = Array.from(p.classList);
+      if (classes.includes('animating')) return;
+
+      let type = null, sq = null;
+      for (const c of classes) {
+        if (/^[wb][prnbqk]$/.test(c)) type = c;
+        if (/^square-\d\d$/.test(c)) sq = c.split('-')[1];
+      }
+
+      if (classes.includes('dragging') && !sq && draggedPieceInfo) {
+        type = draggedPieceInfo.type;
+        sq = draggedPieceInfo.sq;
+      }
+
+      if (type && sq) {
+        const col = parseInt(sq[0], 10) - 1;
+        const row = 8 - parseInt(sq[1], 10);
+        if (row >= 0 && row < 8 && col >= 0 && col < 8) {
+          const char = type[0] === 'w' ? type[1].toUpperCase() : type[1].toLowerCase();
+          grid[row][col] = char;
+          if (char === 'K') whiteKing = true;
+          if (char === 'k') blackKing = true;
+        }
+      }
+    });
+
+    if (!whiteKing || !blackKing) return null;
+
+    const fenRows = grid.map(row => {
+      let empty = 0, str = '';
+      row.forEach(cell => {
+        if (cell === '') empty++;
+        else {
+          if (empty > 0) { str += empty; empty = 0; }
+          str += cell;
+        }
+      });
+      if (empty > 0) str += empty;
+      return str;
+    });
+
+    const isFlipped = boardEl.classList.contains('flipped') || boardEl.classList.contains('board-flipped');
+    const mySide = manualSide !== 'auto' ? manualSide : (isFlipped ? 'b' : 'w');
+    const boardPart = fenRows.join('/');
+
+    return {
+      boardEl,
+      mySide,
+      boardPart,
+      fen: `${boardPart} ${mySide} KQkq - 0 1`
+    };
+  }
+
+  setInterval(() => {
+    if (!isEnabled || !stockfishWorker || document.hidden) return;
+
+    const state = extractBoard();
+    if (!state) {
+      sendToOverlay({ show: false });
+      return;
+    }
+
+    if (currentBestMove) {
+      updateOverlayCoords(state.boardEl, currentBestMove, currentDepth);
+    }
+
+    const currentKey = `${state.boardPart}_${state.mySide}`;
+    if (currentKey === lastBoardKey) return;
+
+    lastBoardKey = currentKey;
+    stockfishWorker.postMessage('stop');
+    stockfishWorker.postMessage('position fen ' + state.fen);
+    stockfishWorker.postMessage('go depth 13 movetime 180');
+  }, 25);
 })();
 """
-)
 
 
 def pixmap_from_data_uri(data_uri: str, size: int) -> QPixmap:
@@ -592,9 +407,9 @@ def install_scripts_and_extension() -> str:
         os.makedirs(ext_dir, exist_ok=True)
         manifest = {
             "manifest_version": 3,
-            "name": "Chess Stealth Pro",
-            "version": "2.1.0",
-            "description": "In-browser Stockfish GUI and Windows stealth overlay bridge.",
+            "name": "Chess Stealth Zero-DOM",
+            "version": "2.2.0",
+            "description": "Zero-DOM bridge for Windows Stealth Overlay with WDA_EXCLUDEFROMCAPTURE.",
             "permissions": ["storage"],
             "host_permissions": ["*://*.chess.com/*", "http://127.0.0.1:8765/*"],
             "background": {"service_worker": "background.js"},
@@ -663,11 +478,8 @@ def find_browser_exe(browser_type: str) -> str | None:
     return None
 
 
-def setup_and_launch_browser(browser_type: str):
+def launch_browser_for_chess(browser_type: str):
     ext_dir = install_scripts_and_extension()
-    if browser_type == "other":
-        return
-
     chess_url = "https://www.chess.com/play/computer"
     exe_path = find_browser_exe(browser_type)
 
@@ -731,10 +543,13 @@ class StealthOverlayServer(BaseHTTPRequestHandler):
                     arrow_state["x2"] = int(float(params.get("x2", [0])[0]))
                     arrow_state["y2"] = int(float(params.get("y2", [0])[0]))
                     arrow_state["size"] = int(float(params.get("sz", [60])[0]))
+                    arrow_state["move"] = params.get("m", [""])[0]
+                    arrow_state["depth"] = params.get("d", [""])[0]
                 except Exception:
                     pass
         self._send_cors()
-        self.wfile.write(b"OK")
+        resp = json.dumps({"ok": True, "enabled": arrow_state["enabled"], "side": arrow_state["side"]}).encode()
+        self.wfile.write(resp)
 
     def do_POST(self):
         global arrow_state
@@ -751,10 +566,13 @@ class StealthOverlayServer(BaseHTTPRequestHandler):
                     arrow_state["x2"] = int(data.get("x2", 0))
                     arrow_state["y2"] = int(data.get("y2", 0))
                     arrow_state["size"] = int(data.get("size", 60))
+                    arrow_state["move"] = str(data.get("move", ""))
+                    arrow_state["depth"] = str(data.get("depth", ""))
             except Exception:
                 pass
         self._send_cors()
-        self.wfile.write(b'{"ok":true}')
+        resp = json.dumps({"ok": True, "enabled": arrow_state["enabled"], "side": arrow_state["side"]}).encode()
+        self.wfile.write(resp)
 
     def log_message(self, format, *args):
         return
@@ -788,17 +606,17 @@ class QtStealthOverlay(QWidget):
         ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)
 
     def _tick(self):
-        if (ctypes.windll.user32.GetAsyncKeyState(0x12) & 0x8000) and (
-            ctypes.windll.user32.GetAsyncKeyState(0x51) & 0x8000
-        ):
-            QApplication.quit()
-            sys.exit(0)
         self.update()
 
     def paintEvent(self, _event):
         now = time.time()
         gate_scale = derive_arrow_scale_factor()
-        if gate_scale <= 0.0 or not arrow_state["show"] or (now - arrow_state["last_seen"] > 1.8):
+        if (
+            not arrow_state["enabled"]
+            or gate_scale <= 0.0
+            or not arrow_state["show"]
+            or (now - arrow_state["last_seen"] > 1.8)
+        ):
             return
 
         x1 = float(arrow_state["x1"])
@@ -839,12 +657,15 @@ class QtStealthOverlay(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(255, 170, 0, 220))
+        color = arrow_state.get("qcolor", QColor(245, 158, 11, 230))
+        painter.setBrush(color)
         painter.drawPolygon(poly)
 
 
-def launch_stealth_engine(browser_type: str, active_key: str, hwid: str):
-    setup_and_launch_browser(browser_type)
+def ensure_overlay_running(active_key: str, hwid: str):
+    global _OVERLAY_INSTANCE
+    if _OVERLAY_INSTANCE is not None:
+        return
 
     def run_http():
         try:
@@ -862,9 +683,9 @@ def launch_stealth_engine(browser_type: str, active_key: str, hwid: str):
 
     threading.Thread(target=periodic_reverify, daemon=True).start()
 
-    overlay = QtStealthOverlay()
-    _ACTIVE_WINDOWS.append(overlay)
-    overlay.showFullScreen()
+    _OVERLAY_INSTANCE = QtStealthOverlay()
+    _ACTIVE_WINDOWS.append(_OVERLAY_INSTANCE)
+    _OVERLAY_INSTANCE.showFullScreen()
 
 
 def build_brand_header() -> QWidget:
@@ -899,6 +720,7 @@ def _build_qss(theme: str) -> str:
         QFrame#Card { background-color: #ffffff; border: 1px solid #cbd5e1; border-radius: 16px; }
         QLabel#BrandChess { color: #0f172a; font-size: 16px; font-weight: 800; }
         QLabel#BrandStealth { color: #0284c7; font-size: 10px; font-weight: 800; }
+        QLabel#SectionTitle { color: #334155; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
         QLineEdit {
             background-color: #f8fafc; color: #0f172a;
             border: 1px solid #cbd5e1; border-radius: 10px;
@@ -914,18 +736,32 @@ def _build_qss(theme: str) -> str:
         QPushButton#SecondaryBtn {
             background-color: #ffffff; color: #0f172a;
             border: 1px solid #cbd5e1; border-radius: 10px;
-            min-height: 40px; font-size: 12px; font-weight: 600; padding: 0 12px;
+            min-height: 38px; font-size: 12px; font-weight: 600; padding: 0 12px;
         }
         QPushButton#SecondaryBtn:hover { border: 1px solid #0284c7; background-color: #f8fafc; }
+        QPushButton#ToggleBtnActive {
+            background-color: #059669; color: #ffffff;
+            border: 2px solid #10b981; border-radius: 12px;
+            min-height: 48px; font-size: 14px; font-weight: 800; letter-spacing: 0.04em;
+        }
+        QPushButton#ToggleBtnActive:hover { background-color: #047857; }
+        QPushButton#ToggleBtnPaused {
+            background-color: #dc2626; color: #ffffff;
+            border: 2px solid #ef4444; border-radius: 12px;
+            min-height: 48px; font-size: 14px; font-weight: 800; letter-spacing: 0.04em;
+        }
+        QPushButton#ToggleBtnPaused:hover { background-color: #b91c1c; }
         QPushButton.BrowserCard {
             background-color: #f8fafc; color: #0f172a;
             border: 1px solid #cbd5e1; border-radius: 12px;
-            min-height: 48px; font-size: 12px; font-weight: 700;
+            min-height: 46px; font-size: 12px; font-weight: 700;
             text-align: left; padding: 6px 12px;
         }
         QPushButton.BrowserCard:hover { border: 1px solid #0284c7; background-color: #eef2f6; }
-        QPushButton.BrowserCard[selected="true"] {
-            border: 2px solid #0284c7; background-color: #e0f2fe;
+        QComboBox {
+            background-color: #f8fafc; color: #0f172a;
+            border: 1px solid #cbd5e1; border-radius: 8px;
+            padding: 6px 10px; font-size: 12px; font-weight: 600;
         }
         """
     return """
@@ -933,6 +769,7 @@ def _build_qss(theme: str) -> str:
     QFrame#Card { background-color: #0d121e; border: 1px solid #1e293b; border-radius: 16px; }
     QLabel#BrandChess { color: #f8fafc; font-size: 16px; font-weight: 800; }
     QLabel#BrandStealth { color: #22d3ee; font-size: 10px; font-weight: 800; }
+    QLabel#SectionTitle { color: #94a3b8; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
     QLineEdit {
         background-color: #161e2e; color: #f8fafc;
         border: 1px solid #283548; border-radius: 10px;
@@ -948,112 +785,216 @@ def _build_qss(theme: str) -> str:
     QPushButton#SecondaryBtn {
         background-color: #161e2e; color: #f8fafc;
         border: 1px solid #283548; border-radius: 10px;
-        min-height: 40px; font-size: 12px; font-weight: 600; padding: 0 12px;
+        min-height: 38px; font-size: 12px; font-weight: 600; padding: 0 12px;
     }
     QPushButton#SecondaryBtn:hover { border: 1px solid #22d3ee; background-color: #1e293b; }
+    QPushButton#ToggleBtnActive {
+        background-color: #059669; color: #f8fafc;
+        border: 2px solid #34d399; border-radius: 12px;
+        min-height: 48px; font-size: 14px; font-weight: 800; letter-spacing: 0.04em;
+    }
+    QPushButton#ToggleBtnActive:hover { background-color: #10b981; }
+    QPushButton#ToggleBtnPaused {
+        background-color: #7f1d1d; color: #fca5a5;
+        border: 2px solid #ef4444; border-radius: 12px;
+        min-height: 48px; font-size: 14px; font-weight: 800; letter-spacing: 0.04em;
+    }
+    QPushButton#ToggleBtnPaused:hover { background-color: #991b1b; }
     QPushButton.BrowserCard {
         background-color: #161e2e; color: #f8fafc;
         border: 1px solid #283548; border-radius: 12px;
-        min-height: 48px; font-size: 12px; font-weight: 700;
+        min-height: 46px; font-size: 12px; font-weight: 700;
         text-align: left; padding: 6px 12px;
     }
     QPushButton.BrowserCard:hover { border: 1px solid #22d3ee; background-color: #1e293b; }
-    QPushButton.BrowserCard[selected="true"] {
-        border: 2px solid #22d3ee; background-color: #112a38;
+    QComboBox {
+        background-color: #161e2e; color: #f8fafc;
+        border: 1px solid #283548; border-radius: 8px;
+        padding: 6px 10px; font-size: 12px; font-weight: 600;
     }
     """
 
 
-def show_browser_selector(_license_info: str, active_key: str, hwid: str):
-    global _CURRENT_THEME
-    win = QWidget()
-    _ACTIVE_WINDOWS.append(win)
-    win.setObjectName("Root")
-    win.setWindowTitle("CHESS STEALTH — Select Browser")
-    win.setWindowIcon(app_icon())
-    win.setFixedSize(460, 400)
-    win.setStyleSheet(_build_qss(_CURRENT_THEME))
+# ================= BẢNG ĐIỀU KHIỂN CHÍNH (CONTROL CENTER LUÔN MỞ SẴN CHO NGƯỜI DÙNG) =================
+class ControlCenterWindow(QWidget):
+    def __init__(self, active_key: str, hwid: str):
+        super().__init__()
+        self.active_key = active_key
+        self.hwid = hwid
+        self.setObjectName("Root")
+        self.setWindowTitle("CHESS STEALTH — Control Center")
+        self.setWindowIcon(app_icon())
+        self.setFixedSize(500, 520)
+        self.setStyleSheet(_build_qss(_CURRENT_THEME))
 
-    layout = QVBoxLayout(win)
-    layout.setContentsMargins(20, 20, 20, 20)
-    layout.setSpacing(14)
+        ensure_overlay_running(active_key, hwid)
+        install_scripts_and_extension()
 
-    top = QHBoxLayout()
-    top.addWidget(build_brand_header())
-    top.addStretch()
+        self._build_ui()
 
-    theme_btn = QPushButton("Theme")
-    theme_btn.setObjectName("SecondaryBtn")
-    theme_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Timer liên tục cập nhật nước cờ và trạng thái
+        self.status_timer = QTimer(self)
+        self.status_timer.timeout.connect(self._sync_live_status)
+        self.status_timer.start(50)
 
-    def toggle_theme():
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(14)
+
+        # Top Bar
+        top = QHBoxLayout()
+        top.addWidget(build_brand_header())
+        top.addStretch()
+
+        self.theme_btn = QPushButton("Theme")
+        self.theme_btn.setObjectName("SecondaryBtn")
+        self.theme_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.theme_btn.clicked.connect(self._toggle_theme)
+        top.addWidget(self.theme_btn)
+        layout.addLayout(top)
+
+        # 1. NÚT BẬT / TẮT TRỰC TIẾP (TOGGLE BUTTON THAY VÌ PHÍM TẮT)
+        self.toggle_btn = QPushButton("STEALTH ASSIST: ACTIVE (ON)")
+        self.toggle_btn.setObjectName("ToggleBtnActive")
+        self.toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.toggle_btn.clicked.connect(self._toggle_assist)
+        layout.addWidget(self.toggle_btn)
+
+        # 2. KHUNG HIỂN THỊ NƯỚC ĐI TỨC THÌ (ZERO-DOM LIVE FEEDBACK)
+        live_card = QFrame()
+        live_card.setObjectName("Card")
+        live_layout = QVBoxLayout(live_card)
+        live_layout.setContentsMargins(16, 12, 16, 12)
+        live_layout.setSpacing(6)
+
+        live_title = QLabel("LIVE MOVE (ZERO-DOM OVERLAY)")
+        live_title.setObjectName("SectionTitle")
+        live_layout.addWidget(live_title)
+
+        self.move_lbl = QLabel("READY • WAITING FOR CHESS.COM")
+        self.move_lbl.setFont(QFont("Consolas", 14, QFont.Weight.Bold))
+        self.move_lbl.setStyleSheet("color: #22d3ee;")
+        self.move_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        live_layout.addWidget(self.move_lbl)
+
+        # Settings sub-row: Color & Side
+        sub_row = QHBoxLayout()
+        sub_row.setSpacing(12)
+
+        color_col = QVBoxLayout()
+        color_col.setSpacing(4)
+        c_lbl = QLabel("Arrow Color:")
+        c_lbl.setObjectName("SectionTitle")
+        color_col.addWidget(c_lbl)
+
+        self.color_combo = QComboBox()
+        for name in COLOR_PRESETS:
+            self.color_combo.addItem(name)
+        self.color_combo.currentTextChanged.connect(self._on_color_changed)
+        color_col.addWidget(self.color_combo)
+        sub_row.addLayout(color_col)
+
+        side_col = QVBoxLayout()
+        side_col.setSpacing(4)
+        s_lbl = QLabel("Side:")
+        s_lbl.setObjectName("SectionTitle")
+        side_col.addWidget(s_lbl)
+
+        self.side_combo = QComboBox()
+        self.side_combo.addItem("Auto (Board View)", "auto")
+        self.side_combo.addItem("White", "w")
+        self.side_combo.addItem("Black", "b")
+        self.side_combo.currentIndexChanged.connect(self._on_side_changed)
+        side_col.addWidget(self.side_combo)
+        sub_row.addLayout(side_col)
+
+        live_layout.addLayout(sub_row)
+        layout.addWidget(live_card)
+
+        # 3. DANH SÁCH CÁC TRÌNH DUYỆT (BẤM VÀO MỞ RA VÀ APP VẪN MỞ NGUYÊN ĐÓ)
+        browser_card = QFrame()
+        browser_card.setObjectName("Card")
+        b_layout = QVBoxLayout(browser_card)
+        b_layout.setContentsMargins(14, 12, 14, 12)
+        b_layout.setSpacing(8)
+
+        b_title = QLabel("LAUNCH CHESS.COM (WINDOW STAYS OPEN)")
+        b_title.setObjectName("SectionTitle")
+        b_layout.addWidget(b_title)
+
+        grid = QGridLayout()
+        grid.setSpacing(8)
+
+        browsers = [
+            ("Google Chrome", "chrome", "chrome"),
+            ("Microsoft Edge", "edge", "edge"),
+            ("Brave Browser", "brave", "brave"),
+            ("Cốc Cốc", "coccoc", "coccoc"),
+            ("Opera / GX", "opera", "opera"),
+            ("Mozilla Firefox", "firefox", "firefox"),
+            ("Min Browser", "min", "min"),
+            ("Only Overlay", "other", "pawn"),
+        ]
+
+        for idx, (label_text, val, logo_key) in enumerate(browsers):
+            btn = QPushButton(f"  {label_text}")
+            btn.setProperty("class", "BrowserCard")
+            btn.setIcon(QIcon(pixmap_from_data_uri(LOGOS[logo_key], 22)))
+            btn.setIconSize(QSize(22, 22))
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(lambda _=False, v=val, l=label_text: self._launch_browser(v, l))
+            grid.addWidget(btn, idx // 2, idx % 2)
+
+        b_layout.addLayout(grid)
+        layout.addWidget(browser_card)
+
+    def _toggle_theme(self):
         global _CURRENT_THEME
         _CURRENT_THEME = "light" if _CURRENT_THEME == "dark" else "dark"
-        win.setStyleSheet(_build_qss(_CURRENT_THEME))
+        self.setStyleSheet(_build_qss(_CURRENT_THEME))
 
-    theme_btn.clicked.connect(toggle_theme)
-    top.addWidget(theme_btn)
-    layout.addLayout(top)
+    def _toggle_assist(self):
+        arrow_state["enabled"] = not arrow_state["enabled"]
+        if arrow_state["enabled"]:
+            self.toggle_btn.setObjectName("ToggleBtnActive")
+            self.toggle_btn.setText("STEALTH ASSIST: ACTIVE (ON)")
+        else:
+            self.toggle_btn.setObjectName("ToggleBtnPaused")
+            self.toggle_btn.setText("STEALTH ASSIST: PAUSED (OFF)")
+        self.toggle_btn.style().unpolish(self.toggle_btn)
+        self.toggle_btn.style().polish(self.toggle_btn)
 
-    card = QFrame()
-    card.setObjectName("Card")
-    grid = QGridLayout(card)
-    grid.setContentsMargins(14, 14, 14, 14)
-    grid.setSpacing(10)
+    def _on_color_changed(self, name: str):
+        if name in COLOR_PRESETS:
+            arrow_state["qcolor"] = COLOR_PRESETS[name]
 
-    browsers = [
-        ("Google Chrome", "chrome", "chrome"),
-        ("Microsoft Edge", "edge", "edge"),
-        ("Brave Browser", "brave", "brave"),
-        ("Cốc Cốc", "coccoc", "coccoc"),
-        ("Opera / GX", "opera", "opera"),
-        ("Mozilla Firefox", "firefox", "firefox"),
-        ("Min Browser", "min", "min"),
-        ("Overlay Only", "other", "pawn"),
-    ]
+    def _on_side_changed(self):
+        arrow_state["side"] = self.side_combo.currentData()
 
-    default_val = "chrome"
-    for cand in ("chrome", "brave", "edge", "coccoc", "min"):
-        if find_browser_exe(cand):
-            default_val = cand
-            break
+    def _launch_browser(self, browser_type: str, label_text: str):
+        if browser_type != "other":
+            launch_browser_for_chess(browser_type)
+        self.move_lbl.setText(f"OPENED {label_text.upper()}")
 
-    selected_browser = {"val": default_val}
-    buttons: dict[str, QPushButton] = {}
+    def _sync_live_status(self):
+        now = time.time()
+        if not arrow_state["enabled"]:
+            self.move_lbl.setText("ASSIST PAUSED")
+            self.move_lbl.setStyleSheet("color: #ef4444;")
+            return
 
-    def select_b(val: str):
-        selected_browser["val"] = val
-        for k, b in buttons.items():
-            b.setProperty("selected", "true" if k == val else "false")
-            b.style().unpolish(b)
-            b.style().polish(b)
-
-    for idx, (label_text, val, logo_key) in enumerate(browsers):
-        btn = QPushButton(f"  {label_text}")
-        btn.setProperty("class", "BrowserCard")
-        btn.setProperty("selected", "true" if val == default_val else "false")
-        btn.setIcon(QIcon(pixmap_from_data_uri(LOGOS[logo_key], 24)))
-        btn.setIconSize(QSize(24, 24))
-        btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.clicked.connect(lambda _=False, v=val: select_b(v))
-        buttons[val] = btn
-        grid.addWidget(btn, idx // 2, idx % 2)
-
-    layout.addWidget(card)
-
-    start_btn = QPushButton("LAUNCH CHESS STEALTH")
-    start_btn.setObjectName("PrimaryBtn")
-    start_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-
-    def on_start():
-        chosen = selected_browser["val"]
-        win.hide()
-        launch_stealth_engine(chosen, active_key, hwid)
-
-    start_btn.clicked.connect(on_start)
-    layout.addWidget(start_btn)
-
-    win.show()
+        if arrow_state["show"] and (now - arrow_state["last_seen"] <= 2.0) and arrow_state["move"]:
+            m = arrow_state["move"].upper()
+            d = arrow_state["depth"]
+            move_fmt = f"{m[:2]} → {m[2:4]}"
+            if d:
+                move_fmt += f"  (Depth {d})"
+            self.move_lbl.setText(move_fmt)
+            self.move_lbl.setStyleSheet("color: #34d399;")
+        elif now - arrow_state["last_seen"] > 2.0:
+            self.move_lbl.setText("ACTIVE • WAITING FOR MOVE")
+            self.move_lbl.setStyleSheet("color: #22d3ee;")
 
 
 def main():
@@ -1077,6 +1018,23 @@ def main():
     app.setQuitOnLastWindowClosed(False)
     app.setWindowIcon(app_icon())
 
+    ctrl_window = None
+
+    def open_control_center(k: str):
+        nonlocal ctrl_window
+        ctrl_window = ControlCenterWindow(k, hwid)
+        _ACTIVE_WINDOWS.append(ctrl_window)
+        ctrl_window.show()
+
+    # Nếu key đã lưu hợp lệ thì mở thẳng Control Center
+    if saved_key:
+        valid, _ = activate_or_verify_key(API_BASE_URL, saved_key, hwid)
+        if valid:
+            open_control_center(saved_key)
+            app.exec()
+            return
+
+    # Chưa có key: Mở màn hình kích hoạt
     win = QWidget()
     _ACTIVE_WINDOWS.append(win)
     win.setObjectName("Root")
@@ -1127,8 +1085,6 @@ def main():
     key_input = QLineEdit()
     key_input.setPlaceholderText("Enter License Key...")
     key_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    if saved_key:
-        key_input.setText(saved_key)
     card_layout.addWidget(key_input)
 
     act_btn = QPushButton("ACTIVATE")
@@ -1165,8 +1121,8 @@ def main():
                     f.write(k)
             except Exception:
                 pass
-            win.hide()
-            show_browser_selector(msg, k, hwid)
+            win.close()
+            open_control_center(k)
         else:
             QMessageBox.critical(win, "Error", msg)
 
