@@ -305,6 +305,85 @@
       color: var(--text-primary);
     }
 
+    .provider-locked-card {
+      min-height: 64px;
+      border-radius: 14px;
+      border: 1px solid var(--accent-cyan);
+      background: var(--accent-cyan-soft);
+      box-shadow: var(--shadow-glow-subtle);
+      padding: 12px 14px;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .prov-locked-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .prov-locked-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .prov-locked-title-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .prov-locked-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 7px;
+      border-radius: 6px;
+      background: var(--accent-cyan);
+      color: var(--accent-cyan-fg);
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .prov-locked-desc {
+      font-size: 12px;
+      color: var(--text-secondary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .prov-change-btn {
+      background: transparent;
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      color: var(--text-secondary);
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 6px 12px;
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    }
+
+    .prov-change-btn:hover {
+      background: var(--bg-elevated-hover);
+      color: var(--text-primary);
+      border-color: var(--border-focus);
+    }
+
     .key-box {
       background: var(--bg-key);
       border: 1px solid var(--border-subtle);
@@ -463,7 +542,7 @@
         </div>
       </div>
 
-      <div class="provider-grid" role="group" aria-label="Select link provider">
+      <div id="provider-grid" class="provider-grid" role="group" aria-label="Select link provider">
         <button id="prov-link4m" class="provider-btn selected" type="button">
           <img class="prov-real-logo" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAAACXBIWXMAAA9hAAAPYQGoP6dpAAANiklEQVR4nO2da2wU1xXH//PYnV17bew1a5uEYBBRgVqACCVNU0SrKiCRVKog0IJEJQMCqYqEI9RPRAmOovCpsgBF/YAFWIpVrITYSaUkKkGVSpDyMBQBQjUqBTuYhw2s3zvvmX6wZzNez+7Oc3eN7k8a3Zk7M+feM3P33HPP3JkFCAQCgUAgEAgEAoFAIBAIBAKBQCAQCAQCgUAgEAgEAoFAIBAIBAKBQCAQCAQCgUAgzCWo318au6wpeAEAVEkHAKjy1KJoAGXkKYAqTZ2kSFr7hab47uJU2T5rBtoOUQz9vptzmRCD0X/cgnRvDKOLqNrhHcce+V0/L1R3Heyad0vZUrX9p6AjIXdCFA2seZsJU+lGwIQAyIDGArritbrFg6YozzJEJXUdQL332vhD+dk3t8Qfh7aomLoxbnXUWXqI9rNiTysLUvG6qjMHDhe7Hgb1Sa7LL1mkAdikZjzaUuw6AFOm3095MxqAYf4J1vh98Z2y+cTNtQm+bIufMmc0ACbsvb98mknwZVuW97RuLFb5/yr7y+d+y3yquoBC9NNy/7DvN8EOVWcOHF4QqY/7LfepaQDlZ9/cMjlPbylEWcVwCOsrE+8EIfep8AE2n7i5VipTu2hRVAtRXn1l4p3qzuZEIcoCgJVXj38VlOynwgc4v/CDS4UuM85W3itEOct7WjfKA6O/CUr+nO8Cqj9rLorZCkXDTOPFjj1Bl0OPi+cClR+k8KBZevZtaSKkFa18Xbp7Mkj5DV+0nQlSPjCHfYDqroNdP5RJLoPg/hHUTdp84ubaaHVyRxCyzcxJH6DqzIHDE5GQrwERt0Srkzu2n7vzkt9yb6/7e0GGm3OuC5ga7pVGWNbgWuLsp37Ka7zYsYcStDo/ZWZjTjWA7efuvKSXxYsajrWCErS6NQNth/ySp5Q9CNS3MDNnfIDqzubE58qH38iYLHZVLEkNjbzvR2wgyDG/FXPGB9BjS4YAIITyYlfFEjbEYuGKpX/zImN5T+tGjVZf8atOdpgTXcDSs29LEj1W7GrkRJEVaLT6ipfYABOhAh3zW1HyDaC662DXk0hN0Yd7dmESI6767zUDbYeYcOHVLGkfoOGLtjN6eFFJDPec4LQfr+5sTuiy6mruoldK1gdovNixZ1SbDDwQEgRUhH7FSWzguZ8v/z7I+uSiJLuA5T2tGx8/1go2FAqC2yv/+Zmd4xovduyhQS3WpOLMvC25BrD5xM21w/fmF9wZ8htVkGvtxAa4Bv4kANBhNt+hgVByPsC/a7+7BAAimyx2VTxD6cgZGyj0mN+KkvIBFn3yaboFcorvs58cM6APDnqVka1/X97TujEUj6bH/G67ACYSGnJZNQAl1AWsO9l/1auM5xMb9mfmabrualFlFYuWrfij1zqxLLvYKjZQvnBeh3nbTRcwuoiqBdzrCJRIA2j4ou3MYNWVVSLjPtgTE0LdN9bvOuVXnYy3bVZUvfEzr7K4peIMh3bNQNshHag15zm1AE8q+BY/Xlcrug9QdebAYZ1PzBruOfEBYkKoe3hr61bLnYrmatHkqemFX+5fdjk5X+52qV4ao7+v7mxOWL2v6MQCPChLDo7sPP6uVx2BIvsAjRc79tSwr7YY25xamd5n1weIyTSy3nwzLO0uBezJz0OotvyV6s7mRDafwIkF+FXqz69Z7nChW9G6gM0nbq5VBhbNMI3mLsCuBRj+3TF7rXa6xTtOpwmtqdtkq5wcLP316qFwlFtstc+uBRiix1q+3L/ssuVOF7oVpQFUdzYnblcO5pzJa8cCxMaE2nzHaIrqasmkd93Brx5FU567gqz1tGkBZph+41wPOhbFB6jF656GLgCwNFG3Kch39q0agR9dQTbsWICfJHf9IjNPFqSU2zJlQUoV3AdY1XE1aysz+wC5KB/lW3rXHSxKEOUhxv8QhNx8FoCn6j/KavpdlheKhMsK2gXkG+vb8QESWNBpZQazoUmK64URa5/LlDe57Wj3oDhsK87vhHwWoP/VfTtz7TcakN2UDrOQBSlVsAD0hvbk6RH27iq7x3NKfFYj4ISR7v6t7+S8EGauLNx3BMAR+7W0x/DW1q11n7/n62touSzAytCuX/bi7bznOk0RZgrjAzRe7Ngzwt5tcnJO5s1fkJLlIPtgp9zln2zzU142CzApzO/8eNOSb/0sy0CdEBYH7gNsP3fnJaZvpa1Hu7niAP/b9l7Y35p5Y3Lb0W6mpvy8X/KsLADNa3lNvzgyEXVTnirJYGKRvkB9gM0nbq7tv09/Y84T2dGsx2cLBVMTd/IO94rB9dUHNtL81JiaDXnrTa0sgFbB2Yo9qJLsaDEQhycWB+oDPAlHLgFARKmCwI4AADhlXs5GkEl9nbap97fuhntrBtoOScMTrqdaqYK+Kd9ogwo/txe4d1KRFU+NINMC8MPxzv5X9wUy0kk3AgqDgfkAL7b3p4UZN98JIpvEs1Xz93oZ7iWvYaWxrsg/XmBjPV+eHW6s33UqVBb13BVkWoB8pt8pVroCAT0LcPto1+wDzKPLO70+3YuvwnVFVmbc3MwbnS/PDtdXH/D83SCzBaBUxlHY2ahvrsV8HBti03m++wAb2pOnKQZZh3t2fIBIWOz04xdw5+vrBZtnzaYW7PVyvmEBaI05H3SQy9y4ffUBNrQnT+sK1ZQp1a4PwKmVEJkxPE7d+Kj87Juep4NTNL3ay/kPb/W9vLynNe9xvesOfnVj/a5TK68e3wnA1Zs9hgXwYk0mJscRK6/IuZ65PeNWefEBGi927NF7qSarfXZ9AMMCxNgXuoCZsQDzm0Ez3w+cGQqnRVHVUzKjyhrC1VUAAErUMK7Ye6cwVl6RvkAaLbfcv/1fMJEwwtEIatgqaNEpo6lz9JQpVZRBTH9G9vrqAxtX3fzA9UWUxiRXTxwN/cx1NzC2JybH0/qZ8c0HiPe+lh7rc4q9mH4mdp8FOIESNejclJqG8rHyiqzr5guWYObL1lKzD/vUR1WuugJd0DyZ/sy6W6VmjAbhmw9AsXo7AIjsGEQ2+9Quu3EAP2cFG8qa02zr5vSR+tixD3Fj/a5TCDN9Ts/zYvrHlcmsOmRLAYAZVup8awAXmuK7BWrsmtWvP6JUpdc5ZZ4teX7NCrZr+q0wLEBcrpxlCXKNEq4t+dMSJ+XI92KuHUjqvuD6lXS1mvU3DtCzt8HS6XITB3BD5ncCUxrv6YGNYQGSobFZliBf0IcKMW/ZKUNO8ue9DHf1ZyKu50RQ94WE73GAmDbkehatVx9A4zjGWGdCs42bwouO1gGgXqlxbAGAqSeRiqL05auz1xiC2QIYdc+nmznP9zjAl/uXXW54Rps1c8Wg0D6AwovphY1y6XXzPqt8g4fsE1cWAADuftf7Yq79Yn/UU+zAIFMPqzyr/UBAcwI/3rTk28nnv04rVwwfQJU1cBLDmPPMN5aNcpb55rx6pQaAcx/AYHjHsUc6hVldAU1RUASpz8/3GIDseuTaH9izgBvrd52KoKIdcP8swClmH8CqCzBjdTEyecg+AeDOBzC4snDfEUWQ+jLznTqK2ZB5yZOfE+h8gAtN8d1GI7CDm/cCzJh9AAAQFCG9nlRSs1KrPHMKuPcBzNz9rvdF400jiqXB3wr7YvrN5NPFKpV5SQ18TuCFpvhuTqy6Zmy7mQ/ghaQypWxMpiHxAuJsGSReQEym0+sAZuwz48UHMBjeceyRqqhvAYA4zvtu+g39kgqm01TOFEA6Lcik0J69DasNP8CuD+AXMVlIKwtgxg021o395m2JFzz7AGauLNx3RNf1Ib9Mv5kfb6qQsW2dSrwA4xvLvj0LyMf3TQ3Uhvbk6f7aTyINQ68L/bWfRIx9RscTyTgnYvok3JjwA1cZWSGOCf/huBlHZf44Q8D0JCkxNf4yANdf3HwUTXUziCKJSVQqK8RJBcB0+6l8lp8/djf6OL4K1+3Ku7xgr+9f/3wgPExyoTLHcmMyjQfCw2TW/w0MAuPPJvuxz9X5ww6Pn/5njxZXhQGQNO3DyW1Hu3OV3e9WeJFIabxaRkeZlMarCyP18eJ8l6SApDRe5SSGEcOq45RFWbGrbwsnOho3H8BsC2AXXaGa1p3sf8GcJw1UeP7K0bwGXPP7L2mNWID5QtjdVpnscksJRzpBAgeGYSJhiEi59wEieuUqABDHp87hTFFccSy/HN3ifx5G+4N9NS0zMJRvey5iVydVmPojaN/jAHZuPgBQ9MyFUBwC8QG4Ssp2QzAIqhGYg0FOCTFc/oNKALc6smC9xwG4itlWw+nN1zXrLoEQPJ6fBRg+gBeC7gJUWXOVziXc6uirDyCO6eAqncsI8tfv9sLMpUbgRTdff3tu+n6AOIHFxHcfwKkFKETfb3zyzUjtrJvz5gpu9PP8LMDsA5Tir1+TVdAhZkYKwNb6XMGJTpn6+eoDGL9+J1agVC3AXMSNfoH8/pxYAtL/F5dAHweTsX3w8Dzv+hEzz/N1rJ588oZhsNmMFDSA8PRiwUSfJNc3hkMTfabPTnj8VzfPnww3MbLz+LvVnc1/dXv+8LajgX2H0C+qKmpK8uspBAKBQCAQCAQCgUAgEAgEAoFAIBAIBAKBQCAQCAQCgUAgEAgEAoFAIBAIBAKBQAiM/wOO+qiB82pUngAAAABJRU5ErkJggg==" alt="Link4m" />
           <span class="prov-name">Link4m</span>
@@ -483,6 +562,26 @@
           <img class="prov-real-logo" src="data:image/png;base64,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" alt="Linkvertise" />
           <span class="prov-name">Linkvertise</span>
         </button>
+      </div>
+
+      <div id="provider-locked-card" class="provider-locked-card hidden">
+        <div class="prov-locked-left">
+          <img id="prov-locked-logo" class="prov-real-logo" src="" alt="Selected Provider" />
+          <div class="prov-locked-meta">
+            <div class="prov-locked-title-row">
+              <span id="prov-locked-name" class="prov-name">Link4m</span>
+              <span class="prov-locked-badge">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                </svg>
+                Locked
+              </span>
+            </div>
+            <span class="prov-locked-desc">Step 2 continues with this provider</span>
+          </div>
+        </div>
+        <button id="change-prov-btn" class="prov-change-btn" type="button" aria-label="Change provider">Change</button>
       </div>
 
       <button id="go-step-btn" class="btn-primary" type="button">
@@ -563,6 +662,13 @@
         }
       };
 
+      const PROVIDER_NAMES = {
+        link4m: 'Link4m',
+        shrinkme: 'ShrinkMe.io',
+        lootlabs: 'LootLabs',
+        linkvertise: 'Linkvertise'
+      };
+
       let selectedProvider = 'link4m';
       let currentTargetStep = 1;
       let activeClaim = null;
@@ -573,6 +679,11 @@
       const stepBox2 = document.getElementById('step-box-2');
       const stepText1 = document.getElementById('step-text-1');
       const stepText2 = document.getElementById('step-text-2');
+      const providerGrid = document.getElementById('provider-grid');
+      const providerLockedCard = document.getElementById('provider-locked-card');
+      const provLockedLogo = document.getElementById('prov-locked-logo');
+      const provLockedName = document.getElementById('prov-locked-name');
+      const changeProvBtn = document.getElementById('change-prov-btn');
       const provLink4m = document.getElementById('prov-link4m');
       const provShrinkme = document.getElementById('prov-shrinkme');
       const provLootlabs = document.getElementById('prov-lootlabs');
@@ -599,18 +710,46 @@
         html.setAttribute('data-theme', next);
       });
 
+      function updateLockedCard() {
+        const provBtn = document.getElementById(`prov-${selectedProvider}`);
+        const logoImg = provBtn ? provBtn.querySelector('img') : null;
+        if (logoImg && provLockedLogo) {
+          provLockedLogo.src = logoImg.src;
+          provLockedLogo.alt = PROVIDER_NAMES[selectedProvider] || selectedProvider;
+        }
+        if (provLockedName) {
+          provLockedName.textContent = PROVIDER_NAMES[selectedProvider] || selectedProvider;
+        }
+      }
+
       function setProvider(name) {
+        if (!SHORTENER_LINKS[name]) return;
         selectedProvider = name;
+        try {
+          localStorage.setItem('chess_stealth_selected_provider', name);
+        } catch (_) {}
         provLink4m.classList.toggle('selected', name === 'link4m');
         provShrinkme.classList.toggle('selected', name === 'shrinkme');
         provLootlabs.classList.toggle('selected', name === 'lootlabs');
         provLinkvertise.classList.toggle('selected', name === 'linkvertise');
+        updateLockedCard();
       }
 
       provLink4m.addEventListener('click', () => setProvider('link4m'));
       provShrinkme.addEventListener('click', () => setProvider('shrinkme'));
       provLootlabs.addEventListener('click', () => setProvider('lootlabs'));
       provLinkvertise.addEventListener('click', () => setProvider('linkvertise'));
+
+      changeProvBtn.addEventListener('click', () => {
+        if (!confirm('Change provider? This will reset your Step 1 progress.')) return;
+        try {
+          const state = JSON.parse(localStorage.getItem(STEP_STORAGE_KEY) || '{}');
+          state.step1Completed = false;
+          delete state.step1Time;
+          localStorage.setItem(STEP_STORAGE_KEY, JSON.stringify(state));
+        } catch (_) {}
+        showCheckpointUI(0);
+      });
 
       async function hmacHex(message) {
         const enc = new TextEncoder();
@@ -667,6 +806,8 @@
           stepBox2.className = 'step-item';
           stepText1.textContent = 'Step 1';
           stepText2.textContent = 'Step 2';
+          providerGrid.classList.remove('hidden');
+          providerLockedCard.classList.add('hidden');
           goStepText.textContent = 'CONTINUE STEP 1 (1 / 2)';
         } else {
           currentTargetStep = 2;
@@ -675,7 +816,11 @@
           stepBox2.className = 'step-item active';
           stepText1.textContent = 'Completed';
           stepText2.textContent = 'Step 2';
-          goStepText.textContent = 'CONTINUE STEP 2 (2 / 2)';
+          providerGrid.classList.add('hidden');
+          updateLockedCard();
+          providerLockedCard.classList.remove('hidden');
+          const pName = PROVIDER_NAMES[selectedProvider] || 'Provider';
+          goStepText.textContent = `CONTINUE STEP 2 (${pName}) (2 / 2)`;
         }
       }
 
@@ -696,6 +841,7 @@
           prev.startedAt = nowSec;
           prev.provider = selectedProvider;
           localStorage.setItem(STEP_STORAGE_KEY, JSON.stringify(prev));
+          localStorage.setItem('chess_stealth_selected_provider', selectedProvider);
         } catch (_) {}
 
         const provLinks = SHORTENER_LINKS[selectedProvider] || SHORTENER_LINKS.link4m;
@@ -748,14 +894,18 @@
         let stepState = {};
         try {
           stepState = JSON.parse(localStorage.getItem(STEP_STORAGE_KEY) || '{}');
-          if (stepState.provider && SHORTENER_LINKS[stepState.provider]) {
-            setProvider(stepState.provider);
+          const savedProv = stepState.provider || localStorage.getItem('chess_stealth_selected_provider');
+          if (savedProv && SHORTENER_LINKS[savedProv]) {
+            setProvider(savedProv);
           }
         } catch (_) {}
 
         if (stepParam === '1') {
           stepState.step1Completed = true;
           stepState.step1Time = nowSec;
+          if (!stepState.provider && selectedProvider) {
+            stepState.provider = selectedProvider;
+          }
           try {
             localStorage.setItem(STEP_STORAGE_KEY, JSON.stringify(stepState));
           } catch (_) {}
@@ -800,7 +950,10 @@
       }
 
       resetClaimBtn.addEventListener('click', () => {
-        try { localStorage.removeItem(STEP_STORAGE_KEY); } catch (_) {}
+        try {
+          localStorage.removeItem(STEP_STORAGE_KEY);
+          localStorage.removeItem('chess_stealth_selected_provider');
+        } catch (_) {}
         window.location.href = window.location.pathname;
       });
 
