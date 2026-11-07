@@ -105,27 +105,8 @@ STEALTH_USERSCRIPT_CODE = r"""// ==UserScript==
   let currentDepth = '';
   let draggedPieceInfo = null;
 
-  let exactOffsetX = null;
-  let exactOffsetY = null;
-  let lastWinX = window.screenX;
-  let lastWinY = window.screenY;
-  let lastInnerW = window.innerWidth;
-  let lastInnerH = window.innerHeight;
-
-  function updateCalibration(e) {
-    if (typeof e.screenX === 'number' && typeof e.clientX === 'number') {
-      exactOffsetX = e.screenX - e.clientX;
-      exactOffsetY = e.screenY - e.clientY;
-      lastWinX = window.screenX;
-      lastWinY = window.screenY;
-      lastInnerW = window.innerWidth;
-      lastInnerH = window.innerHeight;
-    }
-  }
-
-  window.addEventListener('pointermove', updateCalibration, { passive: true, capture: true });
-  window.addEventListener('mousemove', updateCalibration, { passive: true, capture: true });
-  window.addEventListener('pointerdown', updateCalibration, { passive: true, capture: true });
+  // Windows Desktop Stealth Overlay Coordinate Mapper (100% MOUSE-INDEPENDENT)
+  // Không bao giờ đọc tọa độ con trỏ chuột -> Mũi tên đứng yên tuyệt đối trên bàn cờ
 
   function sendToOverlay(payload) {
     fetch('http://127.0.0.1:8765/update', {
@@ -161,26 +142,14 @@ STEALTH_USERSCRIPT_CODE = r"""// ==UserScript==
       return;
     }
 
-    if (
-      window.screenX !== lastWinX ||
-      window.screenY !== lastWinY ||
-      window.innerWidth !== lastInnerW ||
-      window.innerHeight !== lastInnerH
-    ) {
-      exactOffsetX = null;
-      exactOffsetY = null;
-    }
+    // Windows Chrome/Edge/Brave/Cốc Cốc window & title bar calculations (100% mouse-independent)
+    const winX = window.screenX ?? window.screenLeft ?? 0;
+    const winY = window.screenY ?? window.screenTop ?? 0;
+    const borderX = Math.max(0, (window.outerWidth - window.innerWidth) / 2);
+    const topBarHeight = Math.max(0, window.outerHeight - window.innerHeight - borderX);
 
-    let screenOffsetX, screenOffsetY;
-    if (exactOffsetX !== null && exactOffsetY !== null) {
-      screenOffsetX = exactOffsetX;
-      screenOffsetY = exactOffsetY;
-    } else {
-      const borderOffsetX = Math.max(0, (window.outerWidth - window.innerWidth) / 2);
-      const chromeHeight = Math.max(0, window.outerHeight - window.innerHeight - borderOffsetX);
-      screenOffsetX = window.screenX + borderOffsetX;
-      screenOffsetY = window.screenY + chromeHeight;
-    }
+    const screenOffsetX = winX + borderX;
+    const screenOffsetY = winY + topBarHeight;
 
     const isFlipped = boardEl.classList.contains('flipped') || boardEl.classList.contains('board-flipped');
     const sqSize = rect.width / 8;
@@ -908,6 +877,43 @@ class ControlCenterWindow(QWidget):
         self.side_combo.currentIndexChanged.connect(self._on_side_changed)
         side_col.addWidget(self.side_combo)
         sub_row.addLayout(side_col)
+
+        # Nudge Vertical Offset (Hiệu chỉnh cao độ mũi tên)
+        y_col = QVBoxLayout()
+        y_col.setSpacing(4)
+        y_lbl = QLabel("Y-Nudge:")
+        y_lbl.setObjectName("SectionTitle")
+        y_col.addWidget(y_lbl)
+
+        y_btn_row = QHBoxLayout()
+        y_btn_row.setSpacing(4)
+
+        up_btn = QPushButton("▲ -4")
+        up_btn.setObjectName("SecondaryBtn")
+        up_btn.setFixedWidth(44)
+        up_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        self.y_val_lbl = QLabel(f"{arrow_state['offset_y']}px")
+        self.y_val_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.y_val_lbl.setStyleSheet("font-weight: bold; min-width: 42px; font-family: 'Consolas';")
+
+        down_btn = QPushButton("▼ +4")
+        down_btn.setObjectName("SecondaryBtn")
+        down_btn.setFixedWidth(44)
+        down_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        def nudge(delta: int):
+            arrow_state["offset_y"] += delta
+            self.y_val_lbl.setText(f"{arrow_state['offset_y']}px")
+
+        up_btn.clicked.connect(lambda: nudge(-4))
+        down_btn.clicked.connect(lambda: nudge(4))
+
+        y_btn_row.addWidget(up_btn)
+        y_btn_row.addWidget(self.y_val_lbl)
+        y_btn_row.addWidget(down_btn)
+        y_col.addLayout(y_btn_row)
+        sub_row.addLayout(y_col)
 
         live_layout.addLayout(sub_row)
         layout.addWidget(live_card)
