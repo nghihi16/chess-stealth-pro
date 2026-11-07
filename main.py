@@ -561,6 +561,11 @@ def find_browser_viewport() -> tuple[int, int, int, int, int] | None:
                 0,
             )
             if vp:
+                # Ưu tiên chọn Viewport nội dung trang web thực sự (nằm dưới thanh toolbar/tabs của Electron/Min/Chrome)
+                content_views = [c for c in vp if c[1] >= wrect.top + 20]
+                if content_views:
+                    content_views.sort(key=lambda item: item[2] * item[3], reverse=True)
+                    return content_views[0]
                 vp.sort(key=lambda item: item[2] * item[3], reverse=True)
                 return vp[0]
 
