@@ -21,15 +21,9 @@ else:
 DEFAULT_DB_PATH = os.path.join(BASE_DIR, "db", "licenses.sqlite3")
 SCHEMA_PATH = os.path.join(BASE_DIR, "db", "schema.sql")
 
-# Cấu hình kết nối trực tiếp Supabase PostgreSQL (Cloud Online)
-DEFAULT_SUPABASE_DIRECT_URL = (
-    "postgresql://postgres.vhootdaaukwrcxibkamk:iosbreakerprofessional0904"
-    "@aws-0-ap-southeast-2.pooler.supabase.com:5432/postgres"
-)
-DEFAULT_SUPABASE_POOLER_URL = (
-    "postgresql://postgres.vhootdaaukwrcxibkamk:iosbreakerprofessional0904"
-    "@aws-0-ap-southeast-2.pooler.supabase.com:6543/postgres?pgbouncer=true"
-)
+# Đã gỡ bỏ hoàn toàn Supabase: Sử dụng cơ sở dữ liệu SQLite cục bộ bảo mật cao
+DEFAULT_SUPABASE_DIRECT_URL = ""
+DEFAULT_SUPABASE_POOLER_URL = ""
 
 EMBEDDED_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS licenses (
@@ -214,26 +208,10 @@ def get_postgres_url() -> str:
 
 
 def get_db_path() -> str:
-    if _should_use_sqlite():
-        return os.environ["CHESSPRO_DB_PATH"]
-    return "Supabase Cloud PostgreSQL (aws-0-ap-southeast-2.pooler.supabase.com)"
+    return os.environ.get("CHESSPRO_DB_PATH", DEFAULT_DB_PATH)
 
 
 def get_connection():
-    if not _should_use_sqlite() and pg8000 is not None:
-        pg_url = get_postgres_url()
-        parsed = urllib.parse.urlparse(pg_url)
-        raw_conn = pg8000.dbapi.connect(
-            user=urllib.parse.unquote(parsed.username or ""),
-            password=urllib.parse.unquote(parsed.password or ""),
-            host=parsed.hostname or "aws-0-ap-southeast-2.pooler.supabase.com",
-            port=int(parsed.port or 5432),
-            database=(parsed.path or "/postgres").lstrip("/"),
-            ssl_context=True,
-            timeout=10,
-        )
-        return PostgresConnectionWrapper(raw_conn)
-
     db_file = os.environ.get("CHESSPRO_DB_PATH", DEFAULT_DB_PATH)
     os.makedirs(os.path.dirname(db_file), exist_ok=True)
     conn = sqlite3.connect(db_file, check_same_thread=False)
@@ -243,11 +221,10 @@ def get_connection():
 
 
 def init_db() -> None:
-    if not _should_use_sqlite() and pg8000 is not None:
-        with get_connection() as conn:
-            conn.executescript(EMBEDDED_POSTGRES_SCHEMA_SQL)
-            conn.commit()
-        return
+    with get_connection() as conn:
+        conn.executescript(EMBEDDED_SCHEMA_SQL)
+        conn.commit()
+    return
 
     db_file = os.environ.get("CHESSPRO_DB_PATH", DEFAULT_DB_PATH)
     os.makedirs(os.path.dirname(db_file), exist_ok=True)

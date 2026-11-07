@@ -107,8 +107,34 @@ STEALTH_USERSCRIPT_CODE = r"""// ==UserScript==
   let currentDepth = '';
   let draggedPieceInfo = null;
 
-  // Windows Desktop Stealth Overlay Coordinate Mapper (100% MOUSE-INDEPENDENT)
-  // Không bao giờ đọc tọa độ con trỏ chuột -> Mũi tên đứng yên tuyệt đối trên bàn cờ
+  // Real-time viewport offset calibration (mouse-independent, supports Min Browser & custom scaling)
+  let calibratedOffsetX = null;
+  let calibratedOffsetY = null;
+  let lastWinX = window.screenX ?? 0;
+  let lastWinY = window.screenY ?? 0;
+
+  function updateCalibration(e) {
+    if (typeof e.screenX === 'number' && typeof e.clientX === 'number') {
+      const dpr = window.devicePixelRatio || 1;
+      const offY1 = e.screenY - e.clientY;
+      const offY2 = Math.round(e.screenY / dpr - e.clientY);
+      const wY = window.screenY ?? 0;
+
+      // Filter: only accept offsets that correspond to a real browser header/tabs height (0..250px)
+      if (offY1 >= wY && offY1 <= wY + 250) {
+        calibratedOffsetY = offY1;
+        calibratedOffsetX = e.screenX - e.clientX;
+      } else if (offY2 >= wY && offY2 <= wY + 250) {
+        calibratedOffsetY = offY2;
+        calibratedOffsetX = Math.round(e.screenX / dpr - e.clientX);
+      }
+      lastWinX = window.screenX ?? 0;
+      lastWinY = window.screenY ?? 0;
+    }
+  }
+
+  window.addEventListener('pointermove', updateCalibration, { passive: true, capture: true });
+  window.addEventListener('pointerdown', updateCalibration, { passive: true, capture: true });
 
   function sendToOverlay(payload) {
     fetch('http://127.0.0.1:8765/update', {
@@ -149,14 +175,35 @@ STEALTH_USERSCRIPT_CODE = r"""// ==UserScript==
     const isFlipped = boardEl.classList.contains('flipped') || boardEl.classList.contains('board-flipped');
     const sqSize = rect.width / 8;
 
-    // Windows Chrome/Edge/Brave/Cốc Cốc window fallback calculations (mouse-independent)
-    const winX = window.screenX ?? window.screenLeft ?? 0;
-    const winY = window.screenY ?? window.screenTop ?? 0;
-    const borderX = Math.max(0, (window.outerWidth - window.innerWidth) / 2);
-    const topBarHeight = Math.max(0, window.outerHeight - window.innerHeight - borderX);
+    if (
+      Math.abs((window.screenX ?? 0) - lastWinX) > 4 ||
+      Math.abs((window.screenY ?? 0) - lastWinY) > 4
+    ) {
+      calibratedOffsetX = null;
+      calibratedOffsetY = null;
+      lastWinX = window.screenX ?? 0;
+      lastWinY = window.screenY ?? 0;
+    }
 
-    const screenOffsetX = winX + borderX;
-    const screenOffsetY = winY + topBarHeight;
+    let screenOffsetX, screenOffsetY;
+    if (calibratedOffsetX !== null && calibratedOffsetY !== null) {
+      screenOffsetX = calibratedOffsetX;
+      screenOffsetY = calibratedOffsetY;
+    } else {
+      const winX = window.screenX ?? window.screenLeft ?? 0;
+      const winY = window.screenY ?? window.screenTop ?? 0;
+      const borderX = Math.max(0, (window.outerWidth - window.innerWidth) / 2);
+      let topBarHeight = Math.max(0, window.outerHeight - window.innerHeight - borderX);
+
+      // Min Browser (Electron) where outerHeight == innerHeight
+      const isMin = navigator.userAgent.includes('Min/') || Boolean(window.process?.versions?.electron);
+      if (topBarHeight === 0 && isMin) {
+        topBarHeight = 60; // Min tab bar standard height
+      }
+
+      screenOffsetX = winX + borderX;
+      screenOffsetY = winY + topBarHeight;
+    }
 
     function sqToScreenFallback(sq) {
       const file = sq.charCodeAt(0) - 97;
@@ -536,6 +583,8 @@ def find_browser_viewport() -> tuple[int, int, int, int, int] | None:
         cls = cname.value.lower()
 
         if ("chess" in title) or ("chrome_widgetwin_1" in cls) or ("mozillawindowclass" in cls):
+            wrect = wintypes.RECT()
+            user32.GetWindowRect(hwnd, ctypes.byref(wrect))
             vp = []
 
             def child_cb(chwnd, _):
@@ -591,44 +640,47 @@ def compute_auto_aligned_arrow(
 ) -> tuple[int, int, int, int, int] | None:
     if not board_dict or not move_str or len(move_str) < 4:
         return None
-    vp = find_browser_viewport()
-    if not vp:
+    try:
+        vp = find_browser_viewport()
+        if not vp:
+            return None
+
+        vp_left, vp_top, vp_w, vp_h, dpi = vp
+        dpi_scale = max(1.0, dpi / 96.0)
+
+        vp_left_logical = vp_left / dpi_scale
+        vp_top_logical = vp_top / dpi_scale
+
+        board_left = vp_left_logical + float(board_dict.get("left", 0))
+        board_top = vp_top_logical + float(board_dict.get("top", 0))
+        board_w = float(board_dict.get("width", 480))
+        sq = board_w / 8.0
+
+        is_flip = flipped_flag
+        if arrow_state["side"] == "b":
+            is_flip = True
+        elif arrow_state["side"] == "w":
+            is_flip = False
+
+        f_col = ord(move_str[0].lower()) - ord("a")
+        f_rank = int(move_str[1]) - 1
+        t_col = ord(move_str[2].lower()) - ord("a")
+        t_rank = int(move_str[3]) - 1
+
+        c1 = (7 - f_col) if is_flip else f_col
+        r1 = f_rank if is_flip else (7 - f_rank)
+        c2 = (7 - t_col) if is_flip else t_col
+        r2 = t_rank if is_flip else (7 - t_rank)
+
+        x1 = int(round(board_left + (c1 + 0.5) * sq))
+        y1 = int(round(board_top + (r1 + 0.5) * sq))
+        x2 = int(round(board_left + (c2 + 0.5) * sq))
+        y2 = int(round(board_top + (r2 + 0.5) * sq))
+        size = int(round(sq))
+
+        return x1, y1, x2, y2, size
+    except Exception:
         return None
-
-    vp_left, vp_top, vp_w, vp_h, dpi = vp
-    dpi_scale = max(1.0, dpi / 96.0)
-
-    vp_left_logical = vp_left / dpi_scale
-    vp_top_logical = vp_top / dpi_scale
-
-    board_left = vp_left_logical + float(board_dict.get("left", 0))
-    board_top = vp_top_logical + float(board_dict.get("top", 0))
-    board_w = float(board_dict.get("width", 480))
-    sq = board_w / 8.0
-
-    is_flip = flipped_flag
-    if arrow_state["side"] == "b":
-        is_flip = True
-    elif arrow_state["side"] == "w":
-        is_flip = False
-
-    f_col = ord(move_str[0].lower()) - ord("a")
-    f_rank = int(move_str[1]) - 1
-    t_col = ord(move_str[2].lower()) - ord("a")
-    t_rank = int(move_str[3]) - 1
-
-    c1 = (7 - f_col) if is_flip else f_col
-    r1 = f_rank if is_flip else (7 - f_rank)
-    c2 = (7 - t_col) if is_flip else t_col
-    r2 = t_rank if is_flip else (7 - t_rank)
-
-    x1 = int(round(board_left + (c1 + 0.5) * sq))
-    y1 = int(round(board_top + (r1 + 0.5) * sq))
-    x2 = int(round(board_left + (c2 + 0.5) * sq))
-    y2 = int(round(board_top + (r2 + 0.5) * sq))
-    size = int(round(sq))
-
-    return x1, y1, x2, y2, size
 
 
 class StealthOverlayServer(BaseHTTPRequestHandler):

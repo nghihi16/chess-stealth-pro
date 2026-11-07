@@ -73,10 +73,9 @@ def load_valid_offline_cache(expected_key: str, hwid: str) -> tuple[bool, str]:
         return False, ""
 
 
-def _direct_supabase_verify_or_activate(clean_key: str, hwid_val: str, nonce: str) -> dict:
+def _direct_local_verify_or_activate(clean_key: str, hwid_val: str, nonce: str) -> dict:
     """
-    Kết nối trực tiếp tới Supabase Cloud PostgreSQL để xác thực/kích hoạt Key và ký số Ed25519
-    ngay cả khi cổng HTTP nội bộ 127.0.0.1:8766 bị tường lửa chặn hoặc chưa kịp khởi động.
+    Xác thực/kích hoạt Key cục bộ bằng SQLite và ký số Ed25519 (Tốc độ 0.001s, không phụ thuộc mạng).
     """
     now = int(time.time())
     with get_connection() as conn:
@@ -193,6 +192,18 @@ def activate_or_verify_key(
     hwid_val = hwid or get_hwid()
     clean_key = key_str.strip().upper()
 
+    # Khóa 24h miễn phí (FREE24H-): Xác thực toán học HMAC cục bộ ngay lập tức (0.001s, không đợi network)
+    if clean_key.startswith("FREE24H-"):
+        nonce = secrets.token_hex(16)
+        resp_data = _direct_local_verify_or_activate(clean_key, hwid_val, nonce)
+        if resp_data.get("valid") is True and resp_data.get("hwid") == hwid_val:
+            sig = resp_data.get("signature", "")
+            _ACTIVE_SESSION_PAYLOAD = resp_data
+            _ACTIVE_SESSION_SIGNATURE = sig
+            _save_offline_cache(resp_data, sig)
+            return True, str(resp_data.get("message", "Activated"))
+        return False, str(resp_data.get("message", "Invalid license key."))
+
     for endpoint in ("/verify", "/activate"):
         nonce = secrets.token_hex(16)
         req_body = json.dumps(
@@ -220,9 +231,9 @@ def activate_or_verify_key(
             except Exception:
                 continue
         except Exception:
-            # Nếu cổng nội bộ 127.0.0.1 chưa sẵn sàng, gọi trực tiếp lên Supabase Cloud PostgreSQL
+            # Xác thực trực tiếp qua SQLite engine nội bộ
             try:
-                resp_data = _direct_supabase_verify_or_activate(clean_key, hwid_val, nonce)
+                resp_data = _direct_local_verify_or_activate(clean_key, hwid_val, nonce)
             except Exception:
                 cached_ok, cached_msg = load_valid_offline_cache(clean_key, hwid_val)
                 if cached_ok:

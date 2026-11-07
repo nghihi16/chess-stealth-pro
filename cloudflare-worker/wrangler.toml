@@ -1,0 +1,8 @@
+name = "chess-stealth-key-api"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+account_id = "a0cc0916a4df380185fc07827e0682bd"
+
+[vars]
+SECRET_KEY = "CHESS_STEALTH_PRO_WEB24H_SECRET_2026"
+FRONTEND_URL = "https://nghihi16.github.io/chess-stealth-pro"

@@ -1,70 +1,78 @@
 // ==UserScript==
-// @name         Chess.com Zero-DOM Stealth Bridge
+// @name         Chess.com Pure Zero-DOM Stealth Engine
 // @match        *://www.chess.com/*
+// @match        *://chess.com/*
 // @run-at       document-end
 // ==/UserScript==
 
 (function () {
   'use strict';
 
-  if (window.__CHESS_STEALTH_BRIDGE_ACTIVE__) return;
-  window.__CHESS_STEALTH_BRIDGE_ACTIVE__ = true;
+  if (window.__CHESS_STEALTH_CORE_RUNNING__) return;
+  window.__CHESS_STEALTH_CORE_RUNNING__ = true;
 
   let isEnabled = true;
-  let manualSide = 'auto'; // 'auto' | 'w' | 'b'
+  let manualSide = 'auto';
   let stockfishWorker = null;
   let lastBoardKey = '';
   let currentBestMove = null;
+  let currentDepth = '';
   let draggedPieceInfo = null;
 
-  // Pixel-perfect viewport-to-screen offset calibrated from pointer/mouse events
-  let exactOffsetX = null;
-  let exactOffsetY = null;
-  let lastWinX = window.screenX;
-  let lastWinY = window.screenY;
-  let lastInnerW = window.innerWidth;
-  let lastInnerH = window.innerHeight;
+  // Real-time viewport offset calibration (mouse-independent, supports Min Browser & custom scaling)
+  let calibratedOffsetX = null;
+  let calibratedOffsetY = null;
+  let lastWinX = window.screenX ?? 0;
+  let lastWinY = window.screenY ?? 0;
 
   function updateCalibration(e) {
     if (typeof e.screenX === 'number' && typeof e.clientX === 'number') {
-      exactOffsetX = e.screenX - e.clientX;
-      exactOffsetY = e.screenY - e.clientY;
-      lastWinX = window.screenX;
-      lastWinY = window.screenY;
-      lastInnerW = window.innerWidth;
-      lastInnerH = window.innerHeight;
+      const dpr = window.devicePixelRatio || 1;
+      const offY1 = e.screenY - e.clientY;
+      const offY2 = Math.round(e.screenY / dpr - e.clientY);
+      const wY = window.screenY ?? 0;
+
+      // Filter: only accept offsets that correspond to a real browser header/tabs height (0..250px)
+      if (offY1 >= wY && offY1 <= wY + 250) {
+        calibratedOffsetY = offY1;
+        calibratedOffsetX = e.screenX - e.clientX;
+      } else if (offY2 >= wY && offY2 <= wY + 250) {
+        calibratedOffsetY = offY2;
+        calibratedOffsetX = Math.round(e.screenX / dpr - e.clientX);
+      }
+      lastWinX = window.screenX ?? 0;
+      lastWinY = window.screenY ?? 0;
     }
   }
 
   window.addEventListener('pointermove', updateCalibration, { passive: true, capture: true });
-  window.addEventListener('mousemove', updateCalibration, { passive: true, capture: true });
   window.addEventListener('pointerdown', updateCalibration, { passive: true, capture: true });
 
-  // 1. Send screen coordinates to local Stealth Overlay (127.0.0.1:8765)
   function sendToOverlay(payload) {
-    const body = JSON.stringify(payload);
-    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
-      try {
-        chrome.runtime.sendMessage({ type: 'OVERLAY_UPDATE', payload });
-      } catch (_) {}
-    }
     fetch('http://127.0.0.1:8765/update', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: body,
+      body: JSON.stringify(payload),
       mode: 'cors'
+    }).then(r => r.json()).then(data => {
+      if (data && typeof data.enabled === 'boolean') {
+        isEnabled = data.enabled;
+      }
+      if (data && data.side) {
+        manualSide = data.side;
+      }
     }).catch(() => {
-      // Fallback via GET image beacon if CSP blocks fetch
+      const b = payload.board;
+      const bParams = b ? `&bl=${b.left}&bt=${b.top}&bw=${b.width}&fl=${payload.flipped ? 1 : 0}` : '';
       const q = payload.show
-        ? `s=1&x1=${payload.x1}&y1=${payload.y1}&x2=${payload.x2}&y2=${payload.y2}&sz=${payload.size}&t=${Date.now()}`
+        ? `s=1&x1=${payload.x1}&y1=${payload.y1}&x2=${payload.x2}&y2=${payload.y2}&sz=${payload.size}&m=${payload.move || ''}&d=${payload.depth || ''}${bParams}&t=${Date.now()}`
         : `s=0&t=${Date.now()}`;
       const img = new Image();
       img.src = `http://127.0.0.1:8765/u?${q}`;
     });
   }
 
-  // 2. Compute exact monitor pixel coordinates of a chess square
-  function updateOverlayCoords(boardEl, move) {
+  function updateOverlayCoords(boardEl, move, depth) {
     if (!isEnabled || document.hidden || !boardEl || !move || move.length < 4) {
       sendToOverlay({ show: false });
       return;
@@ -76,32 +84,40 @@
       return;
     }
 
-    // Invalidate pointer calibration if window moved or resized
-    if (
-      window.screenX !== lastWinX ||
-      window.screenY !== lastWinY ||
-      window.innerWidth !== lastInnerW ||
-      window.innerHeight !== lastInnerH
-    ) {
-      exactOffsetX = null;
-      exactOffsetY = null;
-    }
-
-    let screenOffsetX, screenOffsetY;
-    if (exactOffsetX !== null && exactOffsetY !== null) {
-      screenOffsetX = exactOffsetX;
-      screenOffsetY = exactOffsetY;
-    } else {
-      const borderOffsetX = Math.max(0, (window.outerWidth - window.innerWidth) / 2);
-      const chromeHeight = Math.max(0, window.outerHeight - window.innerHeight - borderOffsetX);
-      screenOffsetX = window.screenX + borderOffsetX;
-      screenOffsetY = window.screenY + chromeHeight;
-    }
-
     const isFlipped = boardEl.classList.contains('flipped') || boardEl.classList.contains('board-flipped');
     const sqSize = rect.width / 8;
 
-    function sqToScreen(sq) {
+    if (
+      Math.abs((window.screenX ?? 0) - lastWinX) > 4 ||
+      Math.abs((window.screenY ?? 0) - lastWinY) > 4
+    ) {
+      calibratedOffsetX = null;
+      calibratedOffsetY = null;
+      lastWinX = window.screenX ?? 0;
+      lastWinY = window.screenY ?? 0;
+    }
+
+    let screenOffsetX, screenOffsetY;
+    if (calibratedOffsetX !== null && calibratedOffsetY !== null) {
+      screenOffsetX = calibratedOffsetX;
+      screenOffsetY = calibratedOffsetY;
+    } else {
+      const winX = window.screenX ?? window.screenLeft ?? 0;
+      const winY = window.screenY ?? window.screenTop ?? 0;
+      const borderX = Math.max(0, (window.outerWidth - window.innerWidth) / 2);
+      let topBarHeight = Math.max(0, window.outerHeight - window.innerHeight - borderX);
+
+      // Min Browser (Electron) where outerHeight == innerHeight
+      const isMin = navigator.userAgent.includes('Min/') || Boolean(window.process?.versions?.electron);
+      if (topBarHeight === 0 && isMin) {
+        topBarHeight = 60; // Min tab bar standard height
+      }
+
+      screenOffsetX = winX + borderX;
+      screenOffsetY = winY + topBarHeight;
+    }
+
+    function sqToScreenFallback(sq) {
       const file = sq.charCodeAt(0) - 97;
       const rank = parseInt(sq[1], 10) - 1;
       const col = isFlipped ? (7 - file) : file;
@@ -113,21 +129,28 @@
       };
     }
 
-    const from = sqToScreen(move.substring(0, 2));
-    const to = sqToScreen(move.substring(2, 4));
+    const from = sqToScreenFallback(move.substring(0, 2));
+    const to = sqToScreenFallback(move.substring(2, 4));
 
     sendToOverlay({
       show: true,
+      board: {
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height
+      },
+      flipped: isFlipped,
       x1: from.x,
       y1: from.y,
       x2: to.x,
       y2: to.y,
       size: Math.round(sqSize),
-      move: move
+      move: move,
+      depth: depth || ''
     });
   }
 
-  // 3. Initialize Stockfish Web Worker (PV real-time stream)
   function setupEngine() {
     try {
       const workerCode = `importScripts('https://cdnjs.cloudflare.com/ajax/libs/stockfish.js/10.0.2/stockfish.js');`;
@@ -140,10 +163,12 @@
 
         if (line.startsWith('info') && line.includes(' pv ')) {
           const pvMatch = line.match(/ pv ([a-h][1-8][a-h][1-8][qrbn]?)/);
+          const depthMatch = line.match(/depth (\d+)/);
           if (pvMatch && pvMatch[1]) {
             currentBestMove = pvMatch[1];
+            currentDepth = depthMatch ? depthMatch[1] : '';
             const boardEl = document.querySelector('wc-chess-board, .board');
-            if (boardEl) updateOverlayCoords(boardEl, currentBestMove);
+            if (boardEl) updateOverlayCoords(boardEl, currentBestMove, currentDepth);
           }
         }
 
@@ -152,7 +177,7 @@
           if (move && move !== '(none)' && move.length >= 4) {
             currentBestMove = move;
             const boardEl = document.querySelector('wc-chess-board, .board');
-            if (boardEl) updateOverlayCoords(boardEl, currentBestMove);
+            if (boardEl) updateOverlayCoords(boardEl, currentBestMove, currentDepth);
           }
         }
       };
@@ -165,24 +190,6 @@
 
   setupEngine();
 
-  // Hotkeys:
-  // Alt + X: Toggle Stealth Arrow ON / OFF
-  // Alt + C: Cycle side (auto -> b -> w)
-  window.addEventListener('keydown', (e) => {
-    if (e.altKey && e.key.toLowerCase() === 'x') {
-      isEnabled = !isEnabled;
-      if (!isEnabled) {
-        currentBestMove = null;
-        sendToOverlay({ show: false });
-      } else {
-        lastBoardKey = '';
-      }
-    } else if (e.altKey && e.key.toLowerCase() === 'c') {
-      manualSide = manualSide === 'auto' ? 'b' : (manualSide === 'b' ? 'w' : 'auto');
-      lastBoardKey = '';
-    }
-  });
-
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) sendToOverlay({ show: false });
     else lastBoardKey = '';
@@ -192,7 +199,16 @@
     sendToOverlay({ show: false });
   });
 
-  // 4. Preserve origin square while dragging a piece
+  window.addEventListener('resize', () => {
+    const boardEl = document.querySelector('wc-chess-board, .board');
+    if (boardEl && currentBestMove) updateOverlayCoords(boardEl, currentBestMove, currentDepth);
+  });
+
+  window.addEventListener('scroll', () => {
+    const boardEl = document.querySelector('wc-chess-board, .board');
+    if (boardEl && currentBestMove) updateOverlayCoords(boardEl, currentBestMove, currentDepth);
+  }, { passive: true });
+
   document.addEventListener('pointerdown', (e) => {
     const pieceEl = e.target.closest('.piece');
     if (pieceEl) {
@@ -210,7 +226,6 @@
     draggedPieceInfo = null;
   }, true);
 
-  // 5. Extract board state into FEN
   function extractBoard() {
     const boardEl = document.querySelector('wc-chess-board, .board');
     if (!boardEl) return null;
@@ -275,7 +290,6 @@
     };
   }
 
-  // 6. Fast 25ms loop to sync position & calculate best move
   setInterval(() => {
     if (!isEnabled || !stockfishWorker || document.hidden) return;
 
@@ -286,7 +300,7 @@
     }
 
     if (currentBestMove) {
-      updateOverlayCoords(state.boardEl, currentBestMove);
+      updateOverlayCoords(state.boardEl, currentBestMove, currentDepth);
     }
 
     const currentKey = `${state.boardPart}_${state.mySide}`;

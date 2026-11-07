@@ -634,13 +634,14 @@
     (function () {
       const STORAGE_KEY = 'csp_unique_url_claim_v2';
       const STEP_STORAGE_KEY = 'csp_checkpoint_progress_v2';
-      const SECRET_STR = 'CHESS_STEALTH_PRO_WEB24H_SECRET_2026';
+      const WORKER_API_BASE = 'https://chess-stealth-key-api.quitworks.workers.dev';
       const LINKVERTISE_USER_ID = '10578379';
 
-      function buildLinkvertiseUrl(stepNum) {
-        const base = `${window.location.origin}${window.location.pathname}?step=${stepNum}`;
+      function buildLinkvertiseUrl(stepNum, token) {
+        let dest = `${WORKER_API_BASE}/callback/step${stepNum}`;
+        if (token) dest += `?token=${encodeURIComponent(token)}`;
         const rand = Math.floor(Math.random() * 900 + 100);
-        return `https://link-to.net/${LINKVERTISE_USER_ID}/${rand}/dynamic?r=${btoa(encodeURI(base))}`;
+        return `https://link-to.net/${LINKVERTISE_USER_ID}/${rand}/dynamic?r=${btoa(encodeURI(dest))}`;
       }
 
       const SHORTENER_LINKS = {
@@ -672,6 +673,7 @@
       let selectedProvider = 'link4m';
       let currentTargetStep = 1;
       let activeClaim = null;
+      let step2Token = '';
 
       const checkpointView = document.getElementById('checkpoint-view');
       const cpTitle = document.getElementById('cp-title');
@@ -742,49 +744,13 @@
 
       changeProvBtn.addEventListener('click', () => {
         if (!confirm('Change provider? This will reset your Step 1 progress.')) return;
+        step2Token = '';
         try {
-          const state = JSON.parse(localStorage.getItem(STEP_STORAGE_KEY) || '{}');
-          state.step1Completed = false;
-          delete state.step1Time;
-          localStorage.setItem(STEP_STORAGE_KEY, JSON.stringify(state));
+          localStorage.removeItem(STEP_STORAGE_KEY);
         } catch (_) {}
+        window.history.replaceState({}, '', window.location.pathname);
         showCheckpointUI(0);
       });
-
-      async function hmacHex(message) {
-        const enc = new TextEncoder();
-        const cryptoKey = await crypto.subtle.importKey(
-          'raw',
-          enc.encode(SECRET_STR),
-          { name: 'HMAC', hash: 'SHA-256' },
-          false,
-          ['sign']
-        );
-        const sigBuf = await crypto.subtle.sign('HMAC', cryptoKey, enc.encode(message));
-        return Array.from(new Uint8Array(sigBuf))
-          .map(b => b.toString(16).padStart(2, '0'))
-          .join('')
-          .toUpperCase();
-      }
-
-      function randomHex6() {
-        const arr = new Uint8Array(3);
-        crypto.getRandomValues(arr);
-        return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
-      }
-
-      async function buildTokenAndKey(tokenId, expSec) {
-        const expHex = expSec.toString(16).toUpperCase().padStart(8, '0');
-        const urlSig = (await hmacHex(`URL:${tokenId}:${expHex}`)).slice(0, 10);
-        const keySig = (await hmacHex(`KEY:${tokenId}:${expHex}`)).slice(0, 6);
-        return {
-          tokenId,
-          expSec,
-          expHex,
-          urlToken: `${tokenId}-${expHex}-${urlSig}`,
-          licenseKey: `FREE24H-${tokenId}-${expHex}-${keySig}`
-        };
-      }
 
       function showErrorState(title, desc) {
         checkpointView.classList.add('hidden');
@@ -834,125 +800,109 @@
       }
 
       goStepBtn.addEventListener('click', () => {
-        const nowSec = Math.floor(Date.now() / 1000);
-        try {
-          const prev = JSON.parse(localStorage.getItem(STEP_STORAGE_KEY) || '{}');
-          prev.expectedStep = currentTargetStep;
-          prev.startedAt = nowSec;
-          prev.provider = selectedProvider;
-          localStorage.setItem(STEP_STORAGE_KEY, JSON.stringify(prev));
-          localStorage.setItem('chess_stealth_selected_provider', selectedProvider);
-        } catch (_) {}
-
         const provLinks = SHORTENER_LINKS[selectedProvider] || SHORTENER_LINKS.link4m;
-        const dest = (currentTargetStep === 1 ? provLinks.step1 : provLinks.step2) || buildLinkvertiseUrl(currentTargetStep);
+        let dest = currentTargetStep === 1 ? provLinks.step1 : provLinks.step2;
+        if (!dest) {
+          dest = buildLinkvertiseUrl(currentTargetStep, step2Token);
+        }
         window.location.href = dest;
       });
 
-      async function initPage() {
+      function initPage() {
         const nowSec = Math.floor(Date.now() / 1000);
         const params = new URLSearchParams(window.location.search);
-        const urlTokenParam = params.get('token');
+        const errParam = params.get('error');
+        const keyParam = params.get('key');
+        const tokenParam = params.get('token');
         const stepParam = params.get('step');
+        const provParam = params.get('provider');
 
-        let savedClaim = null;
+        // 1. Check for error redirects from Cloudflare Worker
+        if (errParam) {
+          if (errParam === 'step1_required') {
+            showErrorState('Step 1 Incomplete', 'Please complete Step 1 before attempting Step 2.');
+          } else if (errParam === 'token_expired') {
+            showErrorState('Session Expired', 'Your Step 1 verification expired (20 minute limit). Please start again.');
+          } else {
+            showErrorState('Verification Error', 'Security check could not be completed. Please start from Step 1.');
+          }
+          return;
+        }
+
+        // 2. Check for newly issued key from Cloudflare Worker: ?key=FREE24H-...&token=...
+        if (keyParam && keyParam.startsWith('FREE24H-')) {
+          const parts = keyParam.split('-');
+          if (parts.length === 4) {
+            const expSec = parseInt(parts[2], 16);
+            if (!isNaN(expSec) && expSec > nowSec) {
+              const claim = {
+                licenseKey: keyParam,
+                urlToken: tokenParam || `${parts[1]}-${parts[2]}`,
+                expSec
+              };
+              try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(claim));
+                localStorage.removeItem(STEP_STORAGE_KEY);
+              } catch (_) {}
+              renderValidKey(claim);
+              return;
+            }
+          }
+        }
+
+        // 3. Check for cached valid key in localStorage
         try {
           const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
-          if (raw && raw.expSec > nowSec && raw.urlToken && raw.licenseKey) {
-            savedClaim = raw;
+          if (raw && raw.expSec > nowSec && raw.licenseKey) {
+            renderValidKey(raw);
+            return;
           } else if (raw && raw.expSec <= nowSec) {
             localStorage.removeItem(STORAGE_KEY);
           }
         } catch (_) {}
 
-        if (urlTokenParam) {
-          const parts = urlTokenParam.trim().toUpperCase().split('-');
-          if (parts.length !== 3 || parts[0].length !== 6 || parts[1].length !== 8 || parts[2].length !== 10) {
-            showErrorState('Invalid URL', 'The key URL has been modified.');
-            return;
+        // 4. Check for Step 2 return from Cloudflare Worker: ?step=2&token=...&provider=...
+        if (stepParam === '2' && tokenParam) {
+          step2Token = tokenParam;
+          if (provParam && SHORTENER_LINKS[provParam]) {
+            setProvider(provParam);
           }
-
-          const [tId, expHex, providedSig] = parts;
-          const expSec = parseInt(expHex, 16);
-          const expectedUrlSig = (await hmacHex(`URL:${tId}:${expHex}`)).slice(0, 10);
-          if (isNaN(expSec) || providedSig !== expectedUrlSig) {
-            showErrorState('Invalid URL', 'URL signature verification failed.');
-            return;
-          }
-
-          if (expSec <= nowSec) {
-            try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
-            showErrorState('Key Expired', 'Your 24-hour key has expired.');
-            return;
-          }
-
-          const verifiedClaim = await buildTokenAndKey(tId, expSec);
-          renderValidKey(verifiedClaim);
+          try {
+            localStorage.setItem(STEP_STORAGE_KEY, JSON.stringify({
+              step2Token: tokenParam,
+              provider: selectedProvider,
+              time: nowSec
+            }));
+          } catch (_) {}
+          showCheckpointUI(1);
           return;
         }
 
-        let stepState = {};
+        // 5. Check if Step 2 state was saved and still fresh (< 20 mins)
         try {
-          stepState = JSON.parse(localStorage.getItem(STEP_STORAGE_KEY) || '{}');
-          const savedProv = stepState.provider || localStorage.getItem('chess_stealth_selected_provider');
-          if (savedProv && SHORTENER_LINKS[savedProv]) {
-            setProvider(savedProv);
+          const savedStep = JSON.parse(localStorage.getItem(STEP_STORAGE_KEY) || 'null');
+          if (savedStep && savedStep.step2Token && (nowSec - (savedStep.time || 0) < 1200)) {
+            step2Token = savedStep.step2Token;
+            if (savedStep.provider && SHORTENER_LINKS[savedStep.provider]) {
+              setProvider(savedStep.provider);
+            }
+            showCheckpointUI(1);
+            return;
           }
         } catch (_) {}
 
-        if (stepParam === '1') {
-          stepState.step1Completed = true;
-          stepState.step1Time = nowSec;
-          if (!stepState.provider && selectedProvider) {
-            stepState.provider = selectedProvider;
-          }
-          try {
-            localStorage.setItem(STEP_STORAGE_KEY, JSON.stringify(stepState));
-          } catch (_) {}
-          window.history.replaceState({}, '', window.location.pathname);
-          showCheckpointUI(1);
-          return;
+        // 6. Default: Step 1 Initial Screen
+        const savedProv = localStorage.getItem('chess_stealth_selected_provider');
+        if (savedProv && SHORTENER_LINKS[savedProv]) {
+          setProvider(savedProv);
         }
-
-        if (stepParam === '2') {
-          if (!stepState.step1Completed || (nowSec - (stepState.step1Time || 0)) > 7200) {
-            showErrorState('Step 1 Required', 'Please complete Step 1 first.');
-            return;
-          }
-
-          localStorage.removeItem(STEP_STORAGE_KEY);
-          if (!savedClaim) {
-            const newId = randomHex6();
-            const newExp = nowSec + 86400;
-            savedClaim = await buildTokenAndKey(newId, newExp);
-            try {
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(savedClaim));
-            } catch (_) {}
-          }
-          const newUrl = `${window.location.pathname}?token=${savedClaim.urlToken}`;
-          window.history.replaceState({ token: savedClaim.urlToken }, '', newUrl);
-          renderValidKey(savedClaim);
-          return;
-        }
-
-        if (savedClaim) {
-          const newUrl = `${window.location.pathname}?token=${savedClaim.urlToken}`;
-          window.history.replaceState({ token: savedClaim.urlToken }, '', newUrl);
-          renderValidKey(savedClaim);
-          return;
-        }
-
-        if (stepState.step1Completed && (nowSec - (stepState.step1Time || 0)) <= 7200) {
-          showCheckpointUI(1);
-        } else {
-          showCheckpointUI(0);
-        }
+        showCheckpointUI(0);
       }
 
       resetClaimBtn.addEventListener('click', () => {
         try {
           localStorage.removeItem(STEP_STORAGE_KEY);
-          localStorage.removeItem('chess_stealth_selected_provider');
+          localStorage.removeItem(STORAGE_KEY);
         } catch (_) {}
         window.location.href = window.location.pathname;
       });
@@ -981,7 +931,9 @@
         const nowSec = Math.floor(Date.now() / 1000);
         const rem = Math.max(0, activeClaim.expSec - nowSec);
         if (rem === 0) {
-          showErrorState('Key Expired', 'Your 24-hour key has expired.');
+          try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
+          showErrorState('Key Expired', 'Your 24-hour key has expired. Please claim a new key.');
+          activeClaim = null;
           return;
         }
         const h = String(Math.floor(rem / 3600)).padStart(2, '0');
