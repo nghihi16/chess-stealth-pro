@@ -1,5 +1,6 @@
 import base64
 import ctypes
+from ctypes import wintypes
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import math
@@ -74,6 +75,7 @@ arrow_state = {
     "depth": "",
     "last_seen": 0.0,
     "offset_y": 0,
+    "auto_aligned": False,
     "qcolor": QColor(245, 158, 11, 230),
 }
 
@@ -122,8 +124,10 @@ STEALTH_USERSCRIPT_CODE = r"""// ==UserScript==
         manualSide = data.side;
       }
     }).catch(() => {
+      const b = payload.board;
+      const bParams = b ? `&bl=${b.left}&bt=${b.top}&bw=${b.width}&fl=${payload.flipped ? 1 : 0}` : '';
       const q = payload.show
-        ? `s=1&x1=${payload.x1}&y1=${payload.y1}&x2=${payload.x2}&y2=${payload.y2}&sz=${payload.size}&m=${payload.move || ''}&d=${payload.depth || ''}&t=${Date.now()}`
+        ? `s=1&x1=${payload.x1}&y1=${payload.y1}&x2=${payload.x2}&y2=${payload.y2}&sz=${payload.size}&m=${payload.move || ''}&d=${payload.depth || ''}${bParams}&t=${Date.now()}`
         : `s=0&t=${Date.now()}`;
       const img = new Image();
       img.src = `http://127.0.0.1:8765/u?${q}`;
@@ -142,7 +146,10 @@ STEALTH_USERSCRIPT_CODE = r"""// ==UserScript==
       return;
     }
 
-    // Windows Chrome/Edge/Brave/Cốc Cốc window & title bar calculations (100% mouse-independent)
+    const isFlipped = boardEl.classList.contains('flipped') || boardEl.classList.contains('board-flipped');
+    const sqSize = rect.width / 8;
+
+    // Windows Chrome/Edge/Brave/Cốc Cốc window fallback calculations (mouse-independent)
     const winX = window.screenX ?? window.screenLeft ?? 0;
     const winY = window.screenY ?? window.screenTop ?? 0;
     const borderX = Math.max(0, (window.outerWidth - window.innerWidth) / 2);
@@ -151,10 +158,7 @@ STEALTH_USERSCRIPT_CODE = r"""// ==UserScript==
     const screenOffsetX = winX + borderX;
     const screenOffsetY = winY + topBarHeight;
 
-    const isFlipped = boardEl.classList.contains('flipped') || boardEl.classList.contains('board-flipped');
-    const sqSize = rect.width / 8;
-
-    function sqToScreen(sq) {
+    function sqToScreenFallback(sq) {
       const file = sq.charCodeAt(0) - 97;
       const rank = parseInt(sq[1], 10) - 1;
       const col = isFlipped ? (7 - file) : file;
@@ -166,11 +170,18 @@ STEALTH_USERSCRIPT_CODE = r"""// ==UserScript==
       };
     }
 
-    const from = sqToScreen(move.substring(0, 2));
-    const to = sqToScreen(move.substring(2, 4));
+    const from = sqToScreenFallback(move.substring(0, 2));
+    const to = sqToScreenFallback(move.substring(2, 4));
 
     sendToOverlay({
       show: true,
+      board: {
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height
+      },
+      flipped: isFlipped,
       x1: from.x,
       y1: from.y,
       x2: to.x,
@@ -228,6 +239,16 @@ STEALTH_USERSCRIPT_CODE = r"""// ==UserScript==
   window.addEventListener('beforeunload', () => {
     sendToOverlay({ show: false });
   });
+
+  window.addEventListener('resize', () => {
+    const boardEl = document.querySelector('wc-chess-board, .board');
+    if (boardEl && currentBestMove) updateOverlayCoords(boardEl, currentBestMove, currentDepth);
+  });
+
+  window.addEventListener('scroll', () => {
+    const boardEl = document.querySelector('wc-chess-board, .board');
+    if (boardEl && currentBestMove) updateOverlayCoords(boardEl, currentBestMove, currentDepth);
+  }, { passive: true });
 
   document.addEventListener('pointerdown', (e) => {
     const pieceEl = e.target.closest('.piece');
@@ -484,6 +505,127 @@ def launch_browser_for_chess(browser_type: str):
             pass
 
 
+def find_browser_viewport() -> tuple[int, int, int, int, int] | None:
+    """
+    Tự động nhận diện chính xác 100% tọa độ Viewport trình duyệt (Chrome, Edge, Brave, Cốc Cốc, Opera, Firefox...)
+    bằng Win32 API cấp hệ điều hành (không phụ thuộc vào độ cao Bookmarks bar, tab bar hay sidebar).
+    Trả về: (left, top, width, height, dpi)
+    """
+    user32 = ctypes.windll.user32
+    fg = user32.GetForegroundWindow()
+    windows_to_check = [fg] if fg else []
+
+    def enum_cb(hwnd, _):
+        if hwnd != fg and user32.IsWindowVisible(hwnd) and not user32.IsIconic(hwnd):
+            windows_to_check.append(hwnd)
+        return True
+
+    user32.EnumWindows(
+        ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)(enum_cb),
+        0,
+    )
+
+    for hwnd in windows_to_check:
+        length = user32.GetWindowTextLengthW(hwnd)
+        buf = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, buf, length + 1)
+        title = buf.value.lower()
+
+        cname = ctypes.create_unicode_buffer(256)
+        user32.GetClassNameW(hwnd, cname, 256)
+        cls = cname.value.lower()
+
+        if ("chess" in title) or ("chrome_widgetwin_1" in cls) or ("mozillawindowclass" in cls):
+            vp = []
+
+            def child_cb(chwnd, _):
+                cc = ctypes.create_unicode_buffer(256)
+                user32.GetClassNameW(chwnd, cc, 256)
+                c_name = cc.value
+                if c_name in ["Chrome_RenderWidgetHostHWND", "MozillaContentWindowClass"]:
+                    cr = wintypes.RECT()
+                    user32.GetWindowRect(chwnd, ctypes.byref(cr))
+                    w, h = cr.right - cr.left, cr.bottom - cr.top
+                    if w > 300 and h > 300:
+                        dpi = 96
+                        try:
+                            dpi = user32.GetDpiForWindow(chwnd) or 96
+                        except Exception:
+                            pass
+                        vp.append((cr.left, cr.top, w, h, dpi))
+                return True
+
+            user32.EnumChildWindows(
+                hwnd,
+                ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)(child_cb),
+                0,
+            )
+            if vp:
+                vp.sort(key=lambda item: item[2] * item[3], reverse=True)
+                return vp[0]
+
+            # Fallback cho Firefox / Window client area
+            pt = wintypes.POINT(0, 0)
+            user32.ClientToScreen(hwnd, ctypes.byref(pt))
+            crect = wintypes.RECT()
+            user32.GetClientRect(hwnd, ctypes.byref(crect))
+            w, h = crect.right, crect.bottom
+            if w > 300 and h > 300:
+                dpi = 96
+                try:
+                    dpi = user32.GetDpiForWindow(hwnd) or 96
+                except Exception:
+                    pass
+                return (pt.x, pt.y, w, h, dpi)
+
+    return None
+
+
+def compute_auto_aligned_arrow(
+    board_dict: dict, move_str: str, flipped_flag: bool
+) -> tuple[int, int, int, int, int] | None:
+    if not board_dict or not move_str or len(move_str) < 4:
+        return None
+    vp = find_browser_viewport()
+    if not vp:
+        return None
+
+    vp_left, vp_top, vp_w, vp_h, dpi = vp
+    dpi_scale = max(1.0, dpi / 96.0)
+
+    vp_left_logical = vp_left / dpi_scale
+    vp_top_logical = vp_top / dpi_scale
+
+    board_left = vp_left_logical + float(board_dict.get("left", 0))
+    board_top = vp_top_logical + float(board_dict.get("top", 0))
+    board_w = float(board_dict.get("width", 480))
+    sq = board_w / 8.0
+
+    is_flip = flipped_flag
+    if arrow_state["side"] == "b":
+        is_flip = True
+    elif arrow_state["side"] == "w":
+        is_flip = False
+
+    f_col = ord(move_str[0].lower()) - ord("a")
+    f_rank = int(move_str[1]) - 1
+    t_col = ord(move_str[2].lower()) - ord("a")
+    t_rank = int(move_str[3]) - 1
+
+    c1 = (7 - f_col) if is_flip else f_col
+    r1 = f_rank if is_flip else (7 - f_rank)
+    c2 = (7 - t_col) if is_flip else t_col
+    r2 = t_rank if is_flip else (7 - t_rank)
+
+    x1 = int(round(board_left + (c1 + 0.5) * sq))
+    y1 = int(round(board_top + (r1 + 0.5) * sq))
+    x2 = int(round(board_left + (c2 + 0.5) * sq))
+    y2 = int(round(board_top + (r2 + 0.5) * sq))
+    size = int(round(sq))
+
+    return x1, y1, x2, y2, size
+
+
 class StealthOverlayServer(BaseHTTPRequestHandler):
     def _send_cors(self):
         self.send_response(200)
@@ -507,12 +649,29 @@ class StealthOverlayServer(BaseHTTPRequestHandler):
             arrow_state["last_seen"] = time.time()
             if show_flag:
                 try:
-                    arrow_state["x1"] = int(float(params.get("x1", [0])[0]))
-                    arrow_state["y1"] = int(float(params.get("y1", [0])[0]))
-                    arrow_state["x2"] = int(float(params.get("x2", [0])[0]))
-                    arrow_state["y2"] = int(float(params.get("y2", [0])[0]))
-                    arrow_state["size"] = int(float(params.get("sz", [60])[0]))
-                    arrow_state["move"] = params.get("m", [""])[0]
+                    move_str = params.get("m", [""])[0]
+                    aligned = None
+                    if "bl" in params and "bt" in params and "bw" in params and move_str:
+                        board_dict = {
+                            "left": float(params["bl"][0]),
+                            "top": float(params["bt"][0]),
+                            "width": float(params["bw"][0]),
+                        }
+                        flipped_flag = params.get("fl", ["0"])[0] == "1"
+                        aligned = compute_auto_aligned_arrow(board_dict, move_str, flipped_flag)
+
+                    if aligned:
+                        arrow_state["x1"], arrow_state["y1"], arrow_state["x2"], arrow_state["y2"], arrow_state["size"] = aligned
+                        arrow_state["auto_aligned"] = True
+                    else:
+                        arrow_state["x1"] = int(float(params.get("x1", [0])[0]))
+                        arrow_state["y1"] = int(float(params.get("y1", [0])[0]))
+                        arrow_state["x2"] = int(float(params.get("x2", [0])[0]))
+                        arrow_state["y2"] = int(float(params.get("y2", [0])[0]))
+                        arrow_state["size"] = int(float(params.get("sz", [60])[0]))
+                        arrow_state["auto_aligned"] = False
+
+                    arrow_state["move"] = move_str
                     arrow_state["depth"] = params.get("d", [""])[0]
                 except Exception:
                     pass
@@ -530,12 +689,25 @@ class StealthOverlayServer(BaseHTTPRequestHandler):
                 arrow_state["show"] = bool(data.get("show", False))
                 arrow_state["last_seen"] = time.time()
                 if arrow_state["show"]:
-                    arrow_state["x1"] = int(data.get("x1", 0))
-                    arrow_state["y1"] = int(data.get("y1", 0))
-                    arrow_state["x2"] = int(data.get("x2", 0))
-                    arrow_state["y2"] = int(data.get("y2", 0))
-                    arrow_state["size"] = int(data.get("size", 60))
-                    arrow_state["move"] = str(data.get("move", ""))
+                    move_str = str(data.get("move", ""))
+                    board_dict = data.get("board")
+                    flipped_flag = bool(data.get("flipped", False))
+                    aligned = None
+                    if board_dict and move_str:
+                        aligned = compute_auto_aligned_arrow(board_dict, move_str, flipped_flag)
+
+                    if aligned:
+                        arrow_state["x1"], arrow_state["y1"], arrow_state["x2"], arrow_state["y2"], arrow_state["size"] = aligned
+                        arrow_state["auto_aligned"] = True
+                    else:
+                        arrow_state["x1"] = int(data.get("x1", 0))
+                        arrow_state["y1"] = int(data.get("y1", 0))
+                        arrow_state["x2"] = int(data.get("x2", 0))
+                        arrow_state["y2"] = int(data.get("y2", 0))
+                        arrow_state["size"] = int(data.get("size", 60))
+                        arrow_state["auto_aligned"] = False
+
+                    arrow_state["move"] = move_str
                     arrow_state["depth"] = str(data.get("depth", ""))
             except Exception:
                 pass
@@ -996,10 +1168,12 @@ class ControlCenterWindow(QWidget):
             move_fmt = f"{m[:2]} → {m[2:4]}"
             if d:
                 move_fmt += f"  (Depth {d})"
+            if arrow_state.get("auto_aligned"):
+                move_fmt += " • AUTO-SNAP"
             self.move_lbl.setText(move_fmt)
             self.move_lbl.setStyleSheet("color: #34d399;")
         elif now - arrow_state["last_seen"] > 2.0:
-            self.move_lbl.setText("ACTIVE • WAITING FOR MOVE")
+            self.move_lbl.setText("ACTIVE • AUTO-SNAP READY")
             self.move_lbl.setStyleSheet("color: #22d3ee;")
 
 
