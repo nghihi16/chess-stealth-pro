@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-cd /d "%~dp0"
+cd /d "C:\Users\Windows\ChessStealthPro"
 echo ============================================================
 echo   CHESS STEALTH PRO - DONG BO TOAN BO HE THONG (ALL-IN-ONE)
 echo ============================================================
@@ -22,7 +22,7 @@ echo.
 echo ============================================================
 echo [2/2] TRIEN KHAI CLOUDFLARE WORKER...
 echo ============================================================
-cd /d "%~dp0cloudflare-worker"
+cd /d "C:\Users\Windows\ChessStealthPro\cloudflare-worker"
 call npx wrangler whoami 2>&1 | findstr /i "not authenticated" >nul
 if %errorlevel% equ 0 (
     echo [*] Chua xac thuc Cloudflare. Dang mo trinh duyet...
