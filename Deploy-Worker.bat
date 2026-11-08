@@ -5,14 +5,24 @@ echo ============================================================
 echo   CHESS STEALTH PRO - CLOUDFLARE WORKER 1-CLICK DEPLOY
 echo ============================================================
 echo.
-echo [*] Bắt đầu đăng nhập và triển khai Cloudflare Worker...
-echo [*] Trình duyệt sẽ mở ra để bạn bấm xác nhận "Allow"...
+call npx wrangler whoami 2>&1 | findstr /i "not authenticated" >nul
+if %errorlevel% equ 0 (
+    echo [*] Chua xac thuc Cloudflare. Dang mo trinh duyet de dang nhap...
+    echo [*] Vui long bam "Allow" / "Chap nhan" tren trang Cloudflare vua mo ra.
+    call npx wrangler login
+) else (
+    echo [+] Da dang nhap Cloudflare san sang!
+)
 echo.
-call npx wrangler login
-echo.
-echo [*] Đang tải mã nguồn lên Cloudflare Worker...
+echo [*] Dang tai ma nguon len Cloudflare Worker...
 call npx wrangler deploy
-echo.
-echo [+] Triển khai hoàn tất! Hãy copy link .workers.dev hiển thị ở trên.
-echo ============================================================
+if %errorlevel% neq 0 (
+    echo [!] Cloudflare Worker deploy that bai!
+) else (
+    echo.
+    echo ============================================================
+    echo [+] Trien khai hoan tat!
+    echo     Trang Quan Tri: https://chess-stealth-key-api.quitworks.workers.dev/admin
+    echo ============================================================
+)
 pause

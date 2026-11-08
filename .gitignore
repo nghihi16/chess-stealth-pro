@@ -7,3 +7,7 @@ dist/
 *.sqlite3
 .pytest_cache/
 .env
+node_modules/
+.wrangler/
+package-lock.json
+THONG_TIN_QUAN_TRI.txt
