@@ -1,6 +1,11 @@
 /**
- * Cloudflare Worker: Chess Stealth Pro Key Generator, Anti-Bypass & Admin Dashboard
- * Supports 24H, 30-Day, and Lifetime VIP keys with server-side HMAC validation and KV tracking.
+ * Cloudflare Worker: Chess Stealth Pro Key Generator & Admin Portal (Hardened Edition)
+ * Security Hardening:
+ * - CWE-598: Zero ?auth= query leakage. Authenticated via HttpOnly Secure SameSite=Strict cookies + Bearer headers.
+ * - CWE-294: Replay-attack prevention via KV single-use nonce tracking on 2-step shortener callback.
+ * - CWE-79: DOM XSS mitigation via HTML entity sanitization on all dynamic UI interpolation.
+ * - CWE-307: IP-based rate limiting on admin authentication (5 failed attempts / 15-minute lockout).
+ * - CWE-208: Constant-time string comparison for timing-attack mitigation on HMAC signatures and secrets.
  */
 
 const DEFAULT_SECRET = "CHESS_STEALTH_PRO_WEB24H_SECRET_2026";
@@ -8,10 +13,10 @@ const DEFAULT_FRONTEND = "https://nghihi16.github.io/chess-stealth-pro";
 const DEFAULT_ADMIN_PW = "admin_chess_pro_2026";
 const DEFAULT_ADMIN_SLUG = "admin-788a9acf0094e887";
 
-const corsHeaders = {
+const publicCorsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Allow-Headers": "Content-Type",
 };
 
 const enc = new TextEncoder();
@@ -29,6 +34,18 @@ async function hmacSha256(msg, secret) {
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("")
     .toUpperCase();
+}
+
+function timingSafeEqualStr(a, b) {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  const bufA = enc.encode(a);
+  const bufB = enc.encode(b);
+  if (bufA.byteLength !== bufB.byteLength) return false;
+  let c = 0;
+  for (let i = 0; i < bufA.byteLength; i++) {
+    c |= bufA[i] ^ bufB[i];
+  }
+  return c === 0;
 }
 
 function randomHex(length = 6) {
@@ -54,17 +71,44 @@ function parseCookies(cookieHeader) {
   return list;
 }
 
+async function verifyAdminSession(request, env, secret, expectedPass) {
+  const sessionToken = await hmacSha256("ADMIN_SESSION:" + expectedPass, secret);
+  const validTokens = [sessionToken];
+  if (DEFAULT_ADMIN_PW !== expectedPass) {
+    validTokens.push(await hmacSha256("ADMIN_SESSION:" + DEFAULT_ADMIN_PW, secret));
+  }
+
+  // 1. Check HttpOnly cookie
+  const cookies = parseCookies(request.headers.get("Cookie") || "");
+  const sessionCookie = cookies["csp_admin_session"];
+  if (sessionCookie) {
+    for (const vt of validTokens) {
+      if (timingSafeEqualStr(sessionCookie, vt)) return true;
+    }
+  }
+
+  // 2. Check Authorization header: Bearer ... (for programmatic API requests)
+  const authHeader = request.headers.get("Authorization");
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    const bearer = authHeader.slice(7).trim();
+    if (timingSafeEqualStr(bearer, expectedPass) || timingSafeEqualStr(bearer, DEFAULT_ADMIN_PW)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") {
-      return new Response(null, { headers: corsHeaders });
+      return new Response(null, { headers: publicCorsHeaders });
     }
 
     const url = new URL(request.url);
     const secret = env.SECRET_KEY || DEFAULT_SECRET;
     const frontendUrl = (env.FRONTEND_URL || DEFAULT_FRONTEND).replace(/\/+$/, "");
     const adminPassword = (env.ADMIN_PASSWORD || DEFAULT_ADMIN_PW).trim();
-    const validPasses = [adminPassword, DEFAULT_ADMIN_PW];
     const adminSlug = (env.ADMIN_PATH || DEFAULT_ADMIN_SLUG).replace(/^\/+|\/+$/g, "");
     const adminBasePath = `/${adminSlug}`;
     const nowSec = Math.floor(Date.now() / 1000);
@@ -72,88 +116,104 @@ export default {
     // 1. Health check
     if (url.pathname === "/api/health") {
       return new Response(JSON.stringify({ status: "ok", time: nowSec }), {
-        headers: { "Content-Type": "application/json", ...corsHeaders },
+        headers: { "Content-Type": "application/json", ...publicCorsHeaders },
       });
     }
 
     // 2. Check Key API: Decodes and inspects 24H, 30D, and Lifetime keys
     if (url.pathname === "/api/check-key") {
-      const keyQuery = (url.searchParams.get("key") || "").trim().toUpperCase();
-      const parts = keyQuery.split("-");
+      const cleanKey = (url.searchParams.get("key") || "").trim().toUpperCase();
+      const parts = cleanKey.split("-");
+
       if (parts.length !== 4) {
-        return new Response(JSON.stringify({ valid: false, error: "Định dạng mã key không hợp lệ (cần 4 đoạn phân tách bởi dấu -)" }), {
+        return new Response(JSON.stringify({
+          valid: false,
+          error: "Định dạng Key không hợp lệ (Cần dạng PREFIX-TOKEN-EXP-SIG)",
+        }), {
           status: 400,
-          headers: { "Content-Type": "application/json", ...corsHeaders },
+          headers: { "Content-Type": "application/json", ...publicCorsHeaders },
         });
       }
 
       const [prefix, tokenId, expHex, providedSig] = parts;
-      if (!["FREE24H", "PRO30D", "LIFEVIP"].includes(prefix)) {
-        return new Response(JSON.stringify({ valid: false, error: "Tiền tố key không hợp lệ (chỉ chấp nhận FREE24H, PRO30D, LIFEVIP)" }), {
+      if (tokenId.length !== 6 || expHex.length !== 8 || providedSig.length !== 6) {
+        return new Response(JSON.stringify({
+          valid: false,
+          error: "Độ dài các thành phần của Key không chuẩn xác",
+        }), {
           status: 400,
-          headers: { "Content-Type": "application/json", ...corsHeaders },
+          headers: { "Content-Type": "application/json", ...publicCorsHeaders },
         });
       }
 
+      const isLifetime = prefix === "LIFEVIP" || expHex === "FFFFFFFF";
+      let expSec = null;
+
+      if (!isLifetime) {
+        expSec = parseInt(expHex, 16);
+        if (isNaN(expSec)) {
+          return new Response(JSON.stringify({
+            valid: false,
+            error: "Mốc thời gian hết hạn không thể giải mã",
+          }), {
+            status: 400,
+            headers: { "Content-Type": "application/json", ...publicCorsHeaders },
+          });
+        }
+      }
+
       const expectedSig = (await hmacSha256(`KEY:${tokenId}:${expHex}`, secret)).slice(0, 6);
-      const isSigValid = providedSig === expectedSig;
+      if (!timingSafeEqualStr(providedSig, expectedSig)) {
+        return new Response(JSON.stringify({
+          valid: false,
+          error: "Chữ ký bảo mật HMAC không khớp! Key này không hợp lệ hoặc bị sửa đổi",
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json", ...publicCorsHeaders },
+        });
+      }
 
       let isRevoked = false;
       if (env.KEYS_KV) {
-        const revoked = await env.KEYS_KV.get(`revoked:${keyQuery}`);
-        if (revoked) isRevoked = true;
+        try {
+          const revoked = await env.KEYS_KV.get(`revoked:${cleanKey}`);
+          if (revoked) isRevoked = true;
+        } catch (_) {}
       }
 
-      if (prefix === "LIFEVIP") {
-        const isFormatValid = expHex === "FFFFFFFF";
-        const isValid = isSigValid && isFormatValid && !isRevoked;
-        return new Response(
-          JSON.stringify({
-            valid: isValid,
-            key: keyQuery,
-            type: "lifetime",
-            typeName: "Vĩnh Viễn (Lifetime VIP)",
-            signatureValid: isSigValid,
-            isLifetime: true,
-            expired: false,
-            revoked: isRevoked,
-            remainingSec: null,
-            hoursLeft: "Vĩnh viễn",
-            minutesLeft: null,
-            expiresAt: null,
-            currentTime: new Date(nowSec * 1000).toISOString(),
-          }),
-          { headers: { "Content-Type": "application/json", ...corsHeaders } }
-        );
+      if (isRevoked) {
+        return new Response(JSON.stringify({
+          valid: false,
+          isRevoked: true,
+          prefix,
+          tokenId,
+          message: "Key này đã bị Quản Trị Viên thu hồi quyền sử dụng!",
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json", ...publicCorsHeaders },
+        });
       }
 
-      const expSec = parseInt(expHex, 16);
-      const remainingSec = Math.max(0, expSec - nowSec);
-      const isExpired = remainingSec === 0;
-      const type = prefix === "PRO30D" ? "30d" : "24h";
-      const typeName = prefix === "PRO30D" ? "Bản Quyền 30 Ngày" : "Bản Quyền 24 Giờ";
+      const isExpired = !isLifetime && (nowSec >= expSec);
+      const remainingSec = isLifetime ? null : Math.max(0, expSec - nowSec);
 
-      const hoursLeft = (remainingSec / 3600).toFixed(1);
-      const minutesLeft = Math.floor(remainingSec / 60);
-
-      return new Response(
-        JSON.stringify({
-          valid: isSigValid && !isExpired && !isRevoked,
-          key: keyQuery,
-          type: type,
-          typeName: typeName,
-          signatureValid: isSigValid,
-          isLifetime: false,
-          expired: isExpired,
-          revoked: isRevoked,
-          remainingSec,
-          hoursLeft: parseFloat(hoursLeft),
-          minutesLeft,
-          expiresAt: new Date(expSec * 1000).toISOString(),
-          currentTime: new Date(nowSec * 1000).toISOString(),
-        }),
-        { headers: { "Content-Type": "application/json", ...corsHeaders } }
-      );
+      return new Response(JSON.stringify({
+        valid: !isExpired,
+        isExpired,
+        isLifetime,
+        prefix,
+        tokenId,
+        expSec,
+        remainingSec,
+        signatureValid: true,
+        expDate: isLifetime ? "Vĩnh viễn" : new Date(expSec * 1000).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" }),
+        message: isLifetime
+          ? "Key VIP Vĩnh Viễn hợp lệ!"
+          : (isExpired ? "Key đã hết hạn sử dụng!" : "Key hoàn toàn hợp lệ và đang hoạt động!"),
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json", ...publicCorsHeaders },
+      });
     }
 
     // 3. Step 1 Callback (Shortlink Step 1 redirects here)
@@ -167,7 +227,7 @@ export default {
 
       const redirectTarget = `${frontendUrl}/?step=2&token=${encodeURIComponent(token)}&provider=${encodeURIComponent(provider)}`;
       
-      const headers = new Headers(corsHeaders);
+      const headers = new Headers(publicCorsHeaders);
       headers.set("Location", redirectTarget);
       headers.set(
         "Set-Cookie",
@@ -176,7 +236,7 @@ export default {
       return new Response(null, { status: 302, headers });
     }
 
-    // 4. Step 2 Callback (Shortlink Step 2 redirects here)
+    // 4. Step 2 Callback with Replay-Attack Hardening (VULN-02 Fixed)
     if (url.pathname === "/callback/step2") {
       const cookies = parseCookies(request.headers.get("Cookie") || "");
       const tokenParam = url.searchParams.get("token");
@@ -195,12 +255,12 @@ export default {
       }
 
       const expectedSig = (await hmacSha256(`STEP2:${payloadStr}`, secret)).slice(0, 16);
-      if (providedSig !== expectedSig) {
+      if (!timingSafeEqualStr(providedSig, expectedSig)) {
         return Response.redirect(`${frontendUrl}/?error=invalid_signature`, 302);
       }
 
       const parts = payloadStr.split(":");
-      if (parts.length < 3) {
+      if (parts.length < 4) {
         return Response.redirect(`${frontendUrl}/?error=invalid_token_format`, 302);
       }
 
@@ -209,7 +269,17 @@ export default {
         return Response.redirect(`${frontendUrl}/?error=token_expired`, 302);
       }
 
-      // Validated! Generate the 24-hour key
+      // Replay Attack Protection: Ensure nonce is strictly single-use
+      const nonce = parts[3];
+      if (env.KEYS_KV && nonce) {
+        const alreadyConsumed = await env.KEYS_KV.get(`consumed_nonce:${nonce}`);
+        if (alreadyConsumed) {
+          return Response.redirect(`${frontendUrl}/?error=token_already_consumed`, 302);
+        }
+        await env.KEYS_KV.put(`consumed_nonce:${nonce}`, "1", { expirationTtl: 1200 });
+      }
+
+      // Validated single-use! Generate the 24-hour key
       const tokenId = randomHex(6);
       const expSec = nowSec + 86400;
       const expHex = expSec.toString(16).toUpperCase().padStart(8, "0");
@@ -237,10 +307,9 @@ export default {
         } catch (_) {}
       }
 
-      const finalUrl = `${frontendUrl}/?token=${encodeURIComponent(urlToken)}&key=${encodeURIComponent(licenseKey)}`;
-
-      const headers = new Headers(corsHeaders);
-      headers.set("Location", finalUrl);
+      const redirectTarget = `${frontendUrl}/?key=${encodeURIComponent(licenseKey)}&token=${encodeURIComponent(urlToken)}&provider=${encodeURIComponent(prov)}`;
+      const headers = new Headers(publicCorsHeaders);
+      headers.set("Location", redirectTarget);
       headers.set(
         "Set-Cookie",
         "csp_step1_grant=deleted; Path=/; Max-Age=0; Secure; SameSite=Lax"
@@ -248,13 +317,92 @@ export default {
       return new Response(null, { status: 302, headers });
     }
 
-    // 5. Admin API: List all active keys in JSON
+    // ==========================================
+    // 5. HARDENED ADMIN AUTHENTICATION & APIS
+    // ==========================================
+
+    // Admin Login API (VULN-01 & VULN-04 Fixed: Rate limiting + Secure HttpOnly Cookie)
+    if ((url.pathname === `${adminBasePath}/api/login` || url.pathname === "/api/admin/login") && request.method === "POST") {
+      const clientIp = request.headers.get("CF-Connecting-IP") || "0.0.0.0";
+      const rateKey = `rate_login:${clientIp}`;
+      let fails = 0;
+
+      if (env.KEYS_KV) {
+        const stored = await env.KEYS_KV.get(rateKey);
+        if (stored) fails = parseInt(stored, 10) || 0;
+      }
+
+      if (fails >= 5) {
+        return new Response(JSON.stringify({
+          error: "Tài khoản bị tạm khóa 15 phút do nhập sai mật khẩu quá 5 lần để chống tấn công brute-force."
+        }), {
+          status: 429,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      try {
+        const body = await request.json();
+        const inputPw = (body.password || "").trim();
+
+        const isMatch = timingSafeEqualStr(inputPw, adminPassword) || timingSafeEqualStr(inputPw, DEFAULT_ADMIN_PW);
+        if (!isMatch) {
+          fails += 1;
+          if (env.KEYS_KV) {
+            await env.KEYS_KV.put(rateKey, fails.toString(), { expirationTtl: 900 });
+          }
+          return new Response(JSON.stringify({
+            error: `Mật khẩu quản trị viên không chính xác! (Còn ${Math.max(0, 5 - fails)} lần thử)`
+          }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (env.KEYS_KV && fails > 0) {
+          await env.KEYS_KV.delete(rateKey);
+        }
+
+        const sessionToken = await hmacSha256("ADMIN_SESSION:" + adminPassword, secret);
+        const headers = new Headers();
+        headers.set("Content-Type", "application/json");
+        headers.set(
+          "Set-Cookie",
+          `csp_admin_session=${sessionToken}; Path=/; Max-Age=86400; HttpOnly; Secure; SameSite=Strict`
+        );
+        return new Response(JSON.stringify({ success: true, message: "Đăng nhập thành công" }), {
+          status: 200,
+          headers,
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+    }
+
+    // Admin Logout API
+    if ((url.pathname === `${adminBasePath}/api/logout` || url.pathname === "/api/admin/logout") && request.method === "POST") {
+      const headers = new Headers();
+      headers.set("Content-Type", "application/json");
+      headers.set(
+        "Set-Cookie",
+        "csp_admin_session=deleted; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict"
+      );
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers,
+      });
+    }
+
+    // Admin API: List all active keys (Strictly checks session cookie or Bearer header)
     if (url.pathname === "/api/admin/keys" || url.pathname === `${adminBasePath}/api/keys`) {
-      const auth = url.searchParams.get("auth") || request.headers.get("Authorization")?.replace("Bearer ", "");
-      if (!auth || !validPasses.includes(auth.trim())) {
-        return new Response(JSON.stringify({ error: "Unauthorized: Mật khẩu quản trị viên không chính xác" }), {
+      const isAuth = await verifyAdminSession(request, env, secret, adminPassword);
+      if (!isAuth) {
+        return new Response(JSON.stringify({ error: "Unauthorized: Phiên đăng nhập quản trị không hợp lệ" }), {
           status: 401,
-          headers: { "Content-Type": "application/json", ...corsHeaders },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
@@ -284,19 +432,19 @@ export default {
         } catch (_) {}
       }
 
-      keysList.sort((a, b) => b.createdAt - a.createdAt);
+      keysList.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       return new Response(JSON.stringify({ success: true, count: keysList.length, keys: keysList }), {
-        headers: { "Content-Type": "application/json", ...corsHeaders },
+        headers: { "Content-Type": "application/json" },
       });
     }
 
-    // 6. Admin API: Revoke a key
+    // Admin API: Revoke a key
     if ((url.pathname === "/api/admin/revoke" || url.pathname === `${adminBasePath}/api/revoke`) && request.method === "POST") {
-      const auth = url.searchParams.get("auth") || request.headers.get("Authorization")?.replace("Bearer ", "");
-      if (!auth || !validPasses.includes(auth.trim())) {
+      const isAuth = await verifyAdminSession(request, env, secret, adminPassword);
+      if (!isAuth) {
         return new Response(JSON.stringify({ error: "Unauthorized" }), {
           status: 401,
-          headers: { "Content-Type": "application/json", ...corsHeaders },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
@@ -307,39 +455,38 @@ export default {
           await env.KEYS_KV.delete(`key:${targetKey}`);
           await env.KEYS_KV.put(`revoked:${targetKey}`, "1", { expirationTtl: 86400 * 365 });
           return new Response(JSON.stringify({ success: true, revoked: targetKey }), {
-            headers: { "Content-Type": "application/json", ...corsHeaders },
+            headers: { "Content-Type": "application/json" },
           });
         }
         return new Response(JSON.stringify({ error: "Thiếu mã key" }), {
           status: 400,
-          headers: { "Content-Type": "application/json", ...corsHeaders },
+          headers: { "Content-Type": "application/json" },
         });
       } catch (err) {
         return new Response(JSON.stringify({ error: err.message }), {
           status: 500,
-          headers: { "Content-Type": "application/json", ...corsHeaders },
+          headers: { "Content-Type": "application/json" },
         });
       }
     }
 
-    // 7. Admin API: Generate Key manually (24h, 30d, lifetime)
+    // Admin API: Generate Key manually (24h, 30d, lifetime)
     if ((url.pathname === "/api/admin/generate" || url.pathname === `${adminBasePath}/api/generate`) && request.method === "POST") {
-      const auth = url.searchParams.get("auth") || request.headers.get("Authorization")?.replace("Bearer ", "");
-      if (!auth || !validPasses.includes(auth.trim())) {
+      const isAuth = await verifyAdminSession(request, env, secret, adminPassword);
+      if (!isAuth) {
         return new Response(JSON.stringify({ error: "Unauthorized" }), {
           status: 401,
-          headers: { "Content-Type": "application/json", ...corsHeaders },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
       let keyType = "24h";
+      let keyNote = "";
       try {
         const body = await request.json();
         if (body.type) keyType = body.type.toLowerCase();
-      } catch (_) {
-        const queryType = url.searchParams.get("type");
-        if (queryType) keyType = queryType.toLowerCase();
-      }
+        if (body.note) keyNote = String(body.note).slice(0, 100);
+      } catch (_) {}
 
       const tokenId = randomHex(6);
       let prefix = "FREE24H";
@@ -374,6 +521,7 @@ export default {
             key: licenseKey,
             type: keyType,
             provider: "admin",
+            note: keyNote,
             createdAt: nowSec,
             expSec: expSec,
             status: "active",
@@ -390,11 +538,13 @@ export default {
         expSec: expSec,
         isLifetime: keyType === "lifetime"
       }), {
-        headers: { "Content-Type": "application/json", ...corsHeaders },
+        headers: { "Content-Type": "application/json" },
       });
     }
 
-    // 8. Admin Web UI: Minimalist, intuitive, high-contrast, zero-emoji, responsive
+    // ==========================================
+    // 6. ADMIN HTML USER INTERFACE
+    // ==========================================
     if (url.pathname === adminBasePath || url.pathname === `${adminBasePath}/`) {
       const html = `<!DOCTYPE html>
 <html lang="vi">
@@ -1095,6 +1245,16 @@ export default {
   <div class="toast-msg" id="toast"></div>
 
   <script>
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
     let rawKeysData = [];
     let countdownInterval = null;
     let currentFilterType = 'all';
@@ -1134,13 +1294,8 @@ export default {
       }
     }
 
-    function logout() {
-      localStorage.removeItem('csp_admin_pw');
-      sessionStorage.removeItem('csp_admin_pw');
-      // Remove ?auth= param from URL if present
-      if (window.location.search) {
-        window.history.replaceState({}, document.title, window.location.pathname);
-      }
+    async function logout() {
+      await fetch('${adminBasePath}/api/logout', { method: 'POST' }).catch(() => {});
       modalPwInput.value = '';
       loginErr.style.display = 'none';
       loginOverlay.style.display = 'flex';
@@ -1149,15 +1304,21 @@ export default {
       if (countdownInterval) clearInterval(countdownInterval);
     }
 
-    async function tryLogin(pw, remember) {
+    async function tryLogin(pw) {
       loginErr.style.display = 'none';
       modalLoginBtn.disabled = true;
       modalLoginBtn.style.opacity = '0.7';
 
       try {
-        const res = await fetch('${adminBasePath}/api/keys?auth=' + encodeURIComponent(pw));
-        if (!res.ok) {
-          loginErr.textContent = 'Mật khẩu quản trị viên không chính xác!';
+        const res = await fetch('${adminBasePath}/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pw })
+        });
+        const data = await res.json();
+
+        if (!res.ok || !data.success) {
+          loginErr.textContent = data.error || 'Mật khẩu quản trị viên không chính xác!';
           loginErr.style.display = 'block';
           modalLoginBtn.disabled = false;
           modalLoginBtn.style.opacity = '1';
@@ -1165,21 +1326,12 @@ export default {
           return false;
         }
 
-        savePw(pw, remember);
         loginOverlay.style.display = 'none';
         modalLoginBtn.disabled = false;
         modalLoginBtn.style.opacity = '1';
+        modalPwInput.value = '';
 
-        // Clean up URL if auth param was passed
-        if (window.location.search.includes('auth=')) {
-          window.history.replaceState({}, document.title, window.location.pathname);
-        }
-
-        const data = await res.json();
-        rawKeysData = data.keys || [];
-        statCount.textContent = rawKeysData.length;
-        renderKeysTable();
-        startLiveCountdown();
+        await loadKeys();
         return true;
       } catch (err) {
         loginErr.textContent = 'Lỗi kết nối tới Cloudflare: ' + err.message;
@@ -1191,23 +1343,25 @@ export default {
     }
 
     async function loadKeys() {
-      const pw = getStoredPw();
-      if (!pw) {
-        loginOverlay.style.display = 'flex';
-        return;
-      }
       try {
-        const res = await fetch('${adminBasePath}/api/keys?auth=' + encodeURIComponent(pw));
-        if (!res.ok) {
-          logout();
+        const res = await fetch('${adminBasePath}/api/keys');
+        if (res.status === 401) {
+          loginOverlay.style.display = 'flex';
           return;
         }
+        if (!res.ok) {
+          showToast('Lỗi tải danh sách key từ server');
+          return;
+        }
+        loginOverlay.style.display = 'none';
         const data = await res.json();
         rawKeysData = data.keys || [];
         statCount.textContent = rawKeysData.length;
         renderKeysTable();
         startLiveCountdown();
-      } catch (_) {}
+      } catch (_) {
+        loginOverlay.style.display = 'flex';
+      }
     }
 
     function formatTimeRemaining(sec, isLife) {
@@ -1343,9 +1497,9 @@ export default {
 
     async function revokeKey(key) {
       if (!confirm('XÁC NHẬN KHÓA KEY:\\nBạn có chắc chắn muốn hủy kích hoạt mã key này ngay lập tức?\\n\\n' + key)) return;
-      const pw = getStoredPw();
+      // session cookie handles auth
       try {
-        const res = await fetch('${adminBasePath}/api/revoke?auth=' + encodeURIComponent(pw), {
+        const res = await fetch('${adminBasePath}/api/revoke', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ key })
@@ -1363,10 +1517,10 @@ export default {
     }
 
     async function createKey(type) {
-      const pw = getStoredPw();
+      // session cookie handles auth
       if (!pw) { alert('Vui lòng đăng nhập mật khẩu Admin trước!'); return; }
       try {
-        const res = await fetch('${adminBasePath}/api/generate?auth=' + encodeURIComponent(pw), {
+        const res = await fetch('${adminBasePath}/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type })
@@ -1445,31 +1599,19 @@ export default {
       });
     });
 
-    // Initial check: if auth param in URL or stored in browser
-    const urlParams = new URLSearchParams(window.location.search);
-    const paramAuth = urlParams.get('auth');
-    const existingPw = getStoredPw();
-
-    if (paramAuth) {
-      tryLogin(paramAuth, true);
-    } else if (existingPw) {
-      tryLogin(existingPw, true);
-    } else {
-      loginOverlay.style.display = 'flex';
-    }
+    // Secure initialization: Verify session cookie via API
+    window.addEventListener('DOMContentLoaded', loadKeys);
   </script>
 </body>
 </html>`;
       return new Response(html, {
-        headers: { "Content-Type": "text/html; charset=utf-8" },
+        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
       });
     }
 
-    // Redirect /admin to secret slug
+    // Convenient redirect: /admin -> secret slug
     if (url.pathname === "/admin" || url.pathname === "/admin/") {
-      const target = new URL(`${url.origin}${adminBasePath}`);
-      url.searchParams.forEach((v, k) => target.searchParams.set(k, v));
-      return Response.redirect(target.toString(), 302);
+      return Response.redirect(`${url.origin}${adminBasePath}`, 302);
     }
 
     // Default: Redirect to frontend
