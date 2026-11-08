@@ -1,6 +1,8 @@
 @echo off
 chcp 65001 >nul
-cd /d "%~dp0"
+set "BROWSER=C:\Users\Windows\AppData\Local\BraveSoftware\Brave-Browser\Application\brave.exe"
+set "GCM_BROWSER=C:\Users\Windows\AppData\Local\BraveSoftware\Brave-Browser\Application\brave.exe"
+cd /d "C:\Users\Windows\ChessStealthPro"
 echo ============================================================
 echo   CHESS STEALTH PRO - DONG BO GITHUB PAGES (TU DONG HOA)
 echo ============================================================

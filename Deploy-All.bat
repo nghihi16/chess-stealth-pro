@@ -1,5 +1,7 @@
 @echo off
 chcp 65001 >nul
+set "BROWSER=C:\Users\Windows\AppData\Local\BraveSoftware\Brave-Browser\Application\brave.exe"
+set "GCM_BROWSER=C:\Users\Windows\AppData\Local\BraveSoftware\Brave-Browser\Application\brave.exe"
 cd /d "C:\Users\Windows\ChessStealthPro"
 echo ============================================================
 echo   CHESS STEALTH PRO - DONG BO TOAN BO HE THONG (ALL-IN-ONE)
@@ -34,7 +36,7 @@ if %errorlevel% neq 0 (
     echo [!] Cloudflare Worker deploy that bai!
 ) else (
     echo [+] Cloudflare Worker da cap nhat thanh cong!
-    echo     Trang Admin: https://chess-stealth-key-api.quitworks.workers.dev/admin
+    echo     API Worker: https://chess-stealth-key-api.pubgclone123-vn.workers.dev
 )
 
 echo.

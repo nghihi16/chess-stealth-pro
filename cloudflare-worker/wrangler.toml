@@ -1,7 +1,8 @@
 name = "chess-stealth-key-api"
 main = "src/index.js"
 compatibility_date = "2024-11-01"
-account_id = "a0cc0916a4df380185fc07827e0682bd"
+account_id = "b02ee6ad5d32f0e610cb29ab07725bc1"
+workers_dev = true
 
 [vars]
 SECRET_KEY = "CHESS_STEALTH_PRO_WEB24H_SECRET_2026"

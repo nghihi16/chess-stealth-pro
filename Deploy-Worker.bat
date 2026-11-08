@@ -1,6 +1,8 @@
 @echo off
 chcp 65001 >nul
-cd /d "%~dp0cloudflare-worker"
+set "BROWSER=C:\Users\Windows\AppData\Local\BraveSoftware\Brave-Browser\Application\brave.exe"
+set "GCM_BROWSER=C:\Users\Windows\AppData\Local\BraveSoftware\Brave-Browser\Application\brave.exe"
+cd /d "C:\Users\Windows\ChessStealthPro\cloudflare-worker"
 echo ============================================================
 echo   CHESS STEALTH PRO - CLOUDFLARE WORKER 1-CLICK DEPLOY
 echo ============================================================
@@ -22,7 +24,7 @@ if %errorlevel% neq 0 (
     echo.
     echo ============================================================
     echo [+] Trien khai hoan tat!
-    echo     Trang Quan Tri: https://chess-stealth-key-api.quitworks.workers.dev/admin
+    echo     API Worker: https://chess-stealth-key-api.pubgclone123-vn.workers.dev
     echo ============================================================
 )
 pause
