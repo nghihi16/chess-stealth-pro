@@ -1,12 +1,11 @@
 /**
- * Cloudflare Worker: Chess Stealth Pro Key Generator & Anti-Bypass + Admin Management Portal
- * Protects SECRET_KEY on server-side, cryptographically verifies 2-step shortener flow,
- * and provides full Admin Key Management Dashboard via unguessable secret URL slug.
+ * Cloudflare Worker: Chess Stealth Pro Key Generator, Anti-Bypass & Admin Dashboard
+ * Supports 24H, 30-Day, and Lifetime VIP keys with server-side HMAC validation and KV tracking.
  */
 
 const DEFAULT_SECRET = "CHESS_STEALTH_PRO_WEB24H_SECRET_2026";
 const DEFAULT_FRONTEND = "https://nghihi16.github.io/chess-stealth-pro";
-const DEFAULT_ADMIN_PASS = "admin_chess_pro_2026";
+const DEFAULT_ADMIN_PW = "admin_chess_pro_2026";
 const DEFAULT_ADMIN_SLUG = "admin-788a9acf0094e887";
 
 const corsHeaders = {
@@ -55,34 +54,6 @@ function parseCookies(cookieHeader) {
   return list;
 }
 
-function verifyAdmin(request, env, url) {
-  const expectedPass = (env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASS).trim();
-  const validPasses = [expectedPass, DEFAULT_ADMIN_PASS];
-
-  if (url && url.searchParams) {
-    const authParam = (url.searchParams.get("auth") || "").trim();
-    if (authParam && validPasses.includes(authParam)) {
-      return true;
-    }
-  }
-
-  const authHeader = request.headers.get("Authorization");
-  if (authHeader && authHeader.startsWith("Bearer ")) {
-    const token = authHeader.slice(7).trim();
-    if (validPasses.includes(token)) {
-      return true;
-    }
-  }
-
-  const cookies = parseCookies(request.headers.get("Cookie") || "");
-  const sessionVal = (cookies["csp_admin_session"] || "").trim();
-  if (sessionVal && validPasses.includes(sessionVal)) {
-    return true;
-  }
-
-  return false;
-}
-
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") {
@@ -92,10 +63,11 @@ export default {
     const url = new URL(request.url);
     const secret = env.SECRET_KEY || DEFAULT_SECRET;
     const frontendUrl = (env.FRONTEND_URL || DEFAULT_FRONTEND).replace(/\/+$/, "");
-    const nowSec = Math.floor(Date.now() / 1000);
-
+    const adminPassword = (env.ADMIN_PASSWORD || DEFAULT_ADMIN_PW).trim();
+    const validPasses = [adminPassword, DEFAULT_ADMIN_PW];
     const adminSlug = (env.ADMIN_PATH || DEFAULT_ADMIN_SLUG).replace(/^\/+|\/+$/g, "");
     const adminBasePath = `/${adminSlug}`;
+    const nowSec = Math.floor(Date.now() / 1000);
 
     // 1. Health check
     if (url.pathname === "/api/health") {
@@ -104,7 +76,87 @@ export default {
       });
     }
 
-    // 2. Step 1 Callback (Shortlink Step 1 redirects here)
+    // 2. Check Key API: Decodes and inspects 24H, 30D, and Lifetime keys
+    if (url.pathname === "/api/check-key") {
+      const keyQuery = (url.searchParams.get("key") || "").trim().toUpperCase();
+      const parts = keyQuery.split("-");
+      if (parts.length !== 4) {
+        return new Response(JSON.stringify({ valid: false, error: "Định dạng mã key không hợp lệ (cần 4 đoạn phân tách bởi dấu -)" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        });
+      }
+
+      const [prefix, tokenId, expHex, providedSig] = parts;
+      if (!["FREE24H", "PRO30D", "LIFEVIP"].includes(prefix)) {
+        return new Response(JSON.stringify({ valid: false, error: "Tiền tố key không hợp lệ (chỉ chấp nhận FREE24H, PRO30D, LIFEVIP)" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        });
+      }
+
+      const expectedSig = (await hmacSha256(`KEY:${tokenId}:${expHex}`, secret)).slice(0, 6);
+      const isSigValid = providedSig === expectedSig;
+
+      let isRevoked = false;
+      if (env.KEYS_KV) {
+        const revoked = await env.KEYS_KV.get(`revoked:${keyQuery}`);
+        if (revoked) isRevoked = true;
+      }
+
+      if (prefix === "LIFEVIP") {
+        const isFormatValid = expHex === "FFFFFFFF";
+        const isValid = isSigValid && isFormatValid && !isRevoked;
+        return new Response(
+          JSON.stringify({
+            valid: isValid,
+            key: keyQuery,
+            type: "lifetime",
+            typeName: "Vĩnh Viễn (Lifetime VIP)",
+            signatureValid: isSigValid,
+            isLifetime: true,
+            expired: false,
+            revoked: isRevoked,
+            remainingSec: null,
+            hoursLeft: "Vĩnh viễn",
+            minutesLeft: null,
+            expiresAt: null,
+            currentTime: new Date(nowSec * 1000).toISOString(),
+          }),
+          { headers: { "Content-Type": "application/json", ...corsHeaders } }
+        );
+      }
+
+      const expSec = parseInt(expHex, 16);
+      const remainingSec = Math.max(0, expSec - nowSec);
+      const isExpired = remainingSec === 0;
+      const type = prefix === "PRO30D" ? "30d" : "24h";
+      const typeName = prefix === "PRO30D" ? "Bản Quyền 30 Ngày" : "Bản Quyền 24 Giờ";
+
+      const hoursLeft = (remainingSec / 3600).toFixed(1);
+      const minutesLeft = Math.floor(remainingSec / 60);
+
+      return new Response(
+        JSON.stringify({
+          valid: isSigValid && !isExpired && !isRevoked,
+          key: keyQuery,
+          type: type,
+          typeName: typeName,
+          signatureValid: isSigValid,
+          isLifetime: false,
+          expired: isExpired,
+          revoked: isRevoked,
+          remainingSec,
+          hoursLeft: parseFloat(hoursLeft),
+          minutesLeft,
+          expiresAt: new Date(expSec * 1000).toISOString(),
+          currentTime: new Date(nowSec * 1000).toISOString(),
+        }),
+        { headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
+    }
+
+    // 3. Step 1 Callback (Shortlink Step 1 redirects here)
     if (url.pathname === "/callback/step1") {
       const provider = (url.searchParams.get("provider") || "link4m").toLowerCase();
       const nonce = randomHex(8);
@@ -124,7 +176,7 @@ export default {
       return new Response(null, { status: 302, headers });
     }
 
-    // 3. Step 2 Callback (Shortlink Step 2 redirects here)
+    // 4. Step 2 Callback (Shortlink Step 2 redirects here)
     if (url.pathname === "/callback/step2") {
       const cookies = parseCookies(request.headers.get("Cookie") || "");
       const tokenParam = url.searchParams.get("token");
@@ -167,6 +219,23 @@ export default {
 
       const licenseKey = `FREE24H-${tokenId}-${expHex}-${keySig}`;
       const urlToken = `${tokenId}-${expHex}-${urlSig}`;
+      const prov = parts[0] || "link4m";
+
+      if (env.KEYS_KV) {
+        try {
+          const record = {
+            key: licenseKey,
+            type: "24h",
+            provider: prov,
+            createdAt: nowSec,
+            expSec: expSec,
+            status: "active",
+          };
+          await env.KEYS_KV.put(`key:${licenseKey}`, JSON.stringify(record), {
+            expiration: expSec,
+          });
+        } catch (_) {}
+      }
 
       const finalUrl = `${frontendUrl}/?token=${encodeURIComponent(urlToken)}&key=${encodeURIComponent(licenseKey)}`;
 
@@ -179,112 +248,52 @@ export default {
       return new Response(null, { status: 302, headers });
     }
 
-    // 4. JSON API: /api/verify-step2 (if frontend calls via AJAX)
-    if (url.pathname === "/api/verify-step2" && request.method === "POST") {
-      try {
-        const body = await request.json();
-        const token = body.token;
-        if (!token || !token.includes(".")) {
-          return new Response(JSON.stringify({ error: "Missing or invalid token" }), {
-            status: 400,
-            headers: { "Content-Type": "application/json", ...corsHeaders },
-          });
-        }
-
-        const [payloadB64, providedSig] = token.split(".");
-        const payloadStr = atob(payloadB64);
-        const expectedSig = (await hmacSha256(`STEP2:${payloadStr}`, secret)).slice(0, 16);
-        if (providedSig !== expectedSig) {
-          return new Response(JSON.stringify({ error: "Invalid token signature" }), {
-            status: 403,
-            headers: { "Content-Type": "application/json", ...corsHeaders },
-          });
-        }
-
-        const parts = payloadStr.split(":");
-        const tokenExp = parseInt(parts[2], 10);
-        if (isNaN(tokenExp) || nowSec > tokenExp) {
-          return new Response(JSON.stringify({ error: "Token expired" }), {
-            status: 403,
-            headers: { "Content-Type": "application/json", ...corsHeaders },
-          });
-        }
-
-        const tokenId = randomHex(6);
-        const expSec = nowSec + 86400;
-        const expHex = expSec.toString(16).toUpperCase().padStart(8, "0");
-        const keySig = (await hmacSha256(`KEY:${tokenId}:${expHex}`, secret)).slice(0, 6);
-        const urlSig = (await hmacSha256(`URL:${tokenId}:${expHex}`, secret)).slice(0, 10);
-
-        return new Response(
-          JSON.stringify({
-            success: true,
-            licenseKey: `FREE24H-${tokenId}-${expHex}-${keySig}`,
-            urlToken: `${tokenId}-${expHex}-${urlSig}`,
-            expSec,
-          }),
-          { headers: { "Content-Type": "application/json", ...corsHeaders } }
-        );
-      } catch (err) {
-        return new Response(JSON.stringify({ error: err.message }), {
-          status: 500,
+    // 5. Admin API: List all active keys in JSON
+    if (url.pathname === "/api/admin/keys" || url.pathname === `${adminBasePath}/api/keys`) {
+      const auth = url.searchParams.get("auth") || request.headers.get("Authorization")?.replace("Bearer ", "");
+      if (!auth || !validPasses.includes(auth.trim())) {
+        return new Response(JSON.stringify({ error: "Unauthorized: Mật khẩu quản trị viên không chính xác" }), {
+          status: 401,
           headers: { "Content-Type": "application/json", ...corsHeaders },
         });
       }
-    }
 
-    // ==========================================
-    // 5. OBFUSCATED ADMIN MANAGEMENT APIS
-    // ==========================================
-
-    // Admin Login API
-    if (url.pathname === `${adminBasePath}/api/login` && request.method === "POST") {
-      try {
-        const body = await request.json();
-        const pass = (body.password || "").trim();
-        const expectedPass = (env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASS).trim();
-        if (!pass || (pass !== expectedPass && pass !== DEFAULT_ADMIN_PASS)) {
-          return new Response(JSON.stringify({ error: "Mật khẩu quản trị không chính xác" }), {
-            status: 401,
-            headers: { "Content-Type": "application/json", ...corsHeaders },
-          });
-        }
-
-        const headers = new Headers(corsHeaders);
-        headers.set("Content-Type", "application/json");
-        headers.set(
-          "Set-Cookie",
-          `csp_admin_session=${encodeURIComponent(expectedPass)}; Path=/; Max-Age=86400; HttpOnly; Secure; SameSite=Strict`
-        );
-        return new Response(JSON.stringify({ success: true, message: "Đăng nhập thành công" }), {
-          status: 200,
-          headers,
-        });
-      } catch (err) {
-        return new Response(JSON.stringify({ error: err.message }), {
-          status: 500,
-          headers: { "Content-Type": "application/json", ...corsHeaders },
-        });
+      const keysList = [];
+      if (env.KEYS_KV) {
+        try {
+          const list = await env.KEYS_KV.list({ prefix: "key:" });
+          for (const item of list.keys) {
+            const val = await env.KEYS_KV.get(item.name);
+            if (val) {
+              try {
+                const data = JSON.parse(val);
+                if (data.type === "lifetime" || data.expSec === null) {
+                  data.isLifetime = true;
+                  data.remainingSec = null;
+                  data.hoursLeft = "Vĩnh viễn";
+                } else {
+                  data.isLifetime = false;
+                  const rem = Math.max(0, data.expSec - nowSec);
+                  data.remainingSec = rem;
+                  data.hoursLeft = (rem / 3600).toFixed(1);
+                }
+                keysList.push(data);
+              } catch (_) {}
+            }
+          }
+        } catch (_) {}
       }
-    }
 
-    // Admin Logout API
-    if (url.pathname === `${adminBasePath}/api/logout` && request.method === "POST") {
-      const headers = new Headers(corsHeaders);
-      headers.set("Content-Type", "application/json");
-      headers.set(
-        "Set-Cookie",
-        `csp_admin_session=deleted; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict`
-      );
-      return new Response(JSON.stringify({ success: true }), {
-        status: 200,
-        headers,
+      keysList.sort((a, b) => b.createdAt - a.createdAt);
+      return new Response(JSON.stringify({ success: true, count: keysList.length, keys: keysList }), {
+        headers: { "Content-Type": "application/json", ...corsHeaders },
       });
     }
 
-    // Admin Key Generator API
-    if (url.pathname === `${adminBasePath}/api/generate` && request.method === "POST") {
-      if (!verifyAdmin(request, env, url)) {
+    // 6. Admin API: Revoke a key
+    if ((url.pathname === "/api/admin/revoke" || url.pathname === `${adminBasePath}/api/revoke`) && request.method === "POST") {
+      const auth = url.searchParams.get("auth") || request.headers.get("Authorization")?.replace("Bearer ", "");
+      if (!auth || !validPasses.includes(auth.trim())) {
         return new Response(JSON.stringify({ error: "Unauthorized" }), {
           status: 401,
           headers: { "Content-Type": "application/json", ...corsHeaders },
@@ -293,926 +302,1177 @@ export default {
 
       try {
         const body = await request.json();
-        const type = body.type || "trial_24h";
-        let durationSec = 86400;
-        let prefix = "FREE24H";
-
-        if (type === "trial_24h") {
-          durationSec = 86400;
-          prefix = "FREE24H";
-        } else if (type === "week_7d") {
-          durationSec = 7 * 86400;
-          prefix = "PRO07D";
-        } else if (type === "monthly_30d") {
-          durationSec = 30 * 86400;
-          prefix = "PRO30D";
-        } else if (type === "lifetime") {
-          durationSec = 100 * 365 * 86400;
-          prefix = "LIFEVIP";
+        const targetKey = (body.key || "").trim().toUpperCase();
+        if (targetKey && env.KEYS_KV) {
+          await env.KEYS_KV.delete(`key:${targetKey}`);
+          await env.KEYS_KV.put(`revoked:${targetKey}`, "1", { expirationTtl: 86400 * 365 });
+          return new Response(JSON.stringify({ success: true, revoked: targetKey }), {
+            headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
         }
+        return new Response(JSON.stringify({ error: "Thiếu mã key" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500,
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        });
+      }
+    }
 
-        const expSec = nowSec + durationSec;
-        const expHex = expSec.toString(16).toUpperCase().padStart(8, "0");
-        const tokenId = randomHex(6);
-        const keySig = (await hmacSha256(`KEY:${tokenId}:${expHex}`, secret)).slice(0, 6);
-        const licenseKey = `${prefix}-${tokenId}-${expHex}-${keySig}`;
+    // 7. Admin API: Generate Key manually (24h, 30d, lifetime)
+    if ((url.pathname === "/api/admin/generate" || url.pathname === `${adminBasePath}/api/generate`) && request.method === "POST") {
+      const auth = url.searchParams.get("auth") || request.headers.get("Authorization")?.replace("Bearer ", "");
+      if (!auth || !validPasses.includes(auth.trim())) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        });
+      }
 
-        return new Response(
-          JSON.stringify({
-            success: true,
+      let keyType = "24h";
+      try {
+        const body = await request.json();
+        if (body.type) keyType = body.type.toLowerCase();
+      } catch (_) {
+        const queryType = url.searchParams.get("type");
+        if (queryType) keyType = queryType.toLowerCase();
+      }
+
+      const tokenId = randomHex(6);
+      let prefix = "FREE24H";
+      let expSec = null;
+      let expHex = "FFFFFFFF";
+      let kvTtl = null;
+
+      if (keyType === "30d" || keyType === "monthly") {
+        prefix = "PRO30D";
+        expSec = nowSec + (30 * 86400);
+        expHex = expSec.toString(16).toUpperCase().padStart(8, "0");
+        kvTtl = expSec;
+      } else if (keyType === "lifetime" || keyType === "vip") {
+        prefix = "LIFEVIP";
+        expSec = null;
+        expHex = "FFFFFFFF";
+        kvTtl = null;
+      } else {
+        keyType = "24h";
+        prefix = "FREE24H";
+        expSec = nowSec + 86400;
+        expHex = expSec.toString(16).toUpperCase().padStart(8, "0");
+        kvTtl = expSec;
+      }
+
+      const keySig = (await hmacSha256(`KEY:${tokenId}:${expHex}`, secret)).slice(0, 6);
+      const licenseKey = `${prefix}-${tokenId}-${expHex}-${keySig}`;
+
+      if (env.KEYS_KV) {
+        try {
+          const record = {
             key: licenseKey,
-            type,
-            prefix,
-            expSec,
-            expDate: new Date(expSec * 1000).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" }),
-          }),
-          { headers: { "Content-Type": "application/json", ...corsHeaders } }
-        );
-      } catch (err) {
-        return new Response(JSON.stringify({ error: err.message }), {
-          status: 500,
-          headers: { "Content-Type": "application/json", ...corsHeaders },
-        });
+            type: keyType,
+            provider: "admin",
+            createdAt: nowSec,
+            expSec: expSec,
+            status: "active",
+          };
+          const putOptions = kvTtl ? { expiration: kvTtl } : {};
+          await env.KEYS_KV.put(`key:${licenseKey}`, JSON.stringify(record), putOptions);
+        } catch (_) {}
       }
+
+      return new Response(JSON.stringify({
+        success: true,
+        key: licenseKey,
+        type: keyType,
+        expSec: expSec,
+        isLifetime: keyType === "lifetime"
+      }), {
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      });
     }
 
-    // Admin Key Inspector / Verifier API
-    if (url.pathname === `${adminBasePath}/api/verify` && request.method === "POST") {
-      if (!verifyAdmin(request, env, url)) {
-        return new Response(JSON.stringify({ error: "Unauthorized" }), {
-          status: 401,
-          headers: { "Content-Type": "application/json", ...corsHeaders },
-        });
-      }
-
-      try {
-        const body = await request.json();
-        const cleanKey = (body.key || "").trim().toUpperCase();
-        const parts = cleanKey.split("-");
-
-        if (parts.length !== 4) {
-          return new Response(JSON.stringify({
-            valid: false,
-            error: "Định dạng Key không hợp lệ (Phải có dạng PREFIX-ID-EXP-SIG)",
-          }), {
-            status: 200,
-            headers: { "Content-Type": "application/json", ...corsHeaders },
-          });
-        }
-
-        const [prefix, tokenId, expHex, providedSig] = parts;
-        if (tokenId.length !== 6 || expHex.length !== 8 || providedSig.length !== 6) {
-          return new Response(JSON.stringify({
-            valid: false,
-            error: "Độ dài tham số Key không hợp lệ",
-          }), {
-            status: 200,
-            headers: { "Content-Type": "application/json", ...corsHeaders },
-          });
-        }
-
-        const expSec = parseInt(expHex, 16);
-        if (isNaN(expSec)) {
-          return new Response(JSON.stringify({
-            valid: false,
-            error: "Mốc thời gian hết hạn không đọc được",
-          }), {
-            status: 200,
-            headers: { "Content-Type": "application/json", ...corsHeaders },
-          });
-        }
-
-        const expectedSig = (await hmacSha256(`KEY:${tokenId}:${expHex}`, secret)).slice(0, 6);
-        if (providedSig !== expectedSig) {
-          return new Response(JSON.stringify({
-            valid: false,
-            error: "Chữ ký HMAC không khớp! Key này là giả mạo hoặc sai Secret Key",
-          }), {
-            status: 200,
-            headers: { "Content-Type": "application/json", ...corsHeaders },
-          });
-        }
-
-        const isExpired = nowSec >= expSec;
-        const remainingSec = Math.max(0, expSec - nowSec);
-
-        return new Response(JSON.stringify({
-          valid: !isExpired,
-          isExpired,
-          prefix,
-          tokenId,
-          expSec,
-          remainingSec,
-          expDate: new Date(expSec * 1000).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" }),
-          message: isExpired ? "Key này đã hết hạn sử dụng!" : "Key hoàn toàn hợp lệ và có chữ ký bảo mật chuẩn!",
-        }), {
-          status: 200,
-          headers: { "Content-Type": "application/json", ...corsHeaders },
-        });
-      } catch (err) {
-        return new Response(JSON.stringify({ error: err.message }), {
-          status: 500,
-          headers: { "Content-Type": "application/json", ...corsHeaders },
-        });
-      }
-    }
-
-    // ==========================================
-    // 6. OBFUSCATED ADMIN HTML USER INTERFACE
-    // ==========================================
+    // 8. Admin Web UI: Minimalist, intuitive, high-contrast, zero-emoji, responsive
     if (url.pathname === adminBasePath || url.pathname === `${adminBasePath}/`) {
-      const isAuthenticated = verifyAdmin(request, env, url);
-      if (!isAuthenticated) {
-        return new Response(renderAdminLoginPage(adminBasePath), {
-          status: 200,
-          headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
-        });
-      }
-
-      const headers = new Headers({
-        "Content-Type": "text/html; charset=utf-8",
-        "Cache-Control": "no-store",
-      });
-      const expectedPass = env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASS;
-      headers.set(
-        "Set-Cookie",
-        `csp_admin_session=${encodeURIComponent(expectedPass)}; Path=/; Max-Age=86400; HttpOnly; Secure; SameSite=Strict`
-      );
-
-      return new Response(renderAdminDashboardPage(env, frontendUrl, adminBasePath), {
-        status: 200,
-        headers,
-      });
-    }
-
-    // Convenient redirect: /admin -> obfuscated secret admin slug
-    if (url.pathname === "/admin" || url.pathname === "/admin/") {
-      const target = new URL(`${url.origin}${adminBasePath}`);
-      url.searchParams.forEach((val, key) => target.searchParams.set(key, val));
-      return Response.redirect(target.toString(), 302);
-    }
-
-    // Default: Redirect to frontend (bounces scanner URLs)
-    return Response.redirect(frontendUrl, 302);
-  },
-};
-
-// ==========================================
-// HTML RENDERING FUNCTIONS
-// ==========================================
-
-function renderAdminLoginPage(adminBasePath) {
-  return `<!DOCTYPE html>
-<html lang="vi" data-theme="dark">
+      const html = `<!DOCTYPE html>
+<html lang="vi">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Chess Stealth Pro — Quản Trị Viên</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=JetBrains+Mono:wght@600;700&display=swap" rel="stylesheet" />
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Quản Lý Key — Chess Stealth Pro</title>
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #090d16;
+      --card: #111827;
+      --card-muted: #162032;
+      --border: #1f293d;
+      --border-focus: #38bdf8;
+      --text: #f8fafc;
+      --text-sub: #94a3b8;
+      --text-muted: #64748b;
+      --primary: #0284c7;
+      --primary-hover: #0369a1;
+      --cyan: #38bdf8;
+      --green: #10b981;
+      --green-bg: rgba(16, 185, 129, 0.12);
+      --amber: #f59e0b;
+      --amber-bg: rgba(245, 158, 11, 0.12);
+      --purple: #a855f7;
+      --purple-bg: rgba(168, 85, 247, 0.12);
+      --red: #f43f5e;
+      --red-bg: rgba(244, 63, 94, 0.12);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       min-height: 100vh;
-      background: #09090b;
-      color: #f4f4f5;
-      font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
-      display: flex;
-      align-items: center;
-      justify-content: center;
       padding: 24px 16px;
-    }
-    .login-card {
-      width: 100%;
-      max-width: 420px;
-      background: #18181b;
-      border: 1px solid #27272a;
-      border-radius: 20px;
-      padding: 36px 28px;
-      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7);
-    }
-    .header-logo {
       display: flex;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 24px;
-    }
-    .logo-badge {
-      width: 44px;
-      height: 44px;
-      background: rgba(16, 185, 129, 0.12);
-      border: 1px solid rgba(16, 185, 129, 0.3);
-      border-radius: 12px;
-      display: flex;
-      align-items: center;
       justify-content: center;
-      color: #10b981;
-    }
-    h1 { font-size: 20px; font-weight: 800; color: #f4f4f5; letter-spacing: -0.02em; }
-    p.subtitle { font-size: 13px; color: #a1a1aa; line-height: 1.5; margin-top: 2px; }
-    .form-group { margin-top: 24px; }
-    label { font-size: 13px; font-weight: 600; color: #d4d4d8; display: block; margin-bottom: 8px; }
-    .input-wrap {
-      position: relative;
-      display: flex;
-      align-items: center;
-    }
-    input {
-      width: 100%;
-      height: 48px;
-      background: #09090b;
-      border: 1px solid #3f3f46;
-      border-radius: 12px;
-      padding: 0 16px;
-      color: #f4f4f5;
-      font-size: 15px;
-      font-family: inherit;
-      transition: border-color 0.15s, box-shadow 0.15s;
-    }
-    input:focus {
-      outline: none;
-      border-color: #10b981;
-      box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
-    }
-    button.submit-btn {
-      width: 100%;
-      height: 48px;
-      background: #10b981;
-      color: #09090b;
-      border: none;
-      border-radius: 12px;
-      font-size: 15px;
-      font-weight: 700;
-      cursor: pointer;
-      margin-top: 20px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      transition: background 0.15s, transform 0.05s;
-    }
-    button.submit-btn:hover { background: #059669; }
-    button.submit-btn:active { transform: scale(0.98); }
-    .error-msg {
-      background: rgba(239, 68, 68, 0.12);
-      border: 1px solid rgba(239, 68, 68, 0.3);
-      color: #f87171;
-      padding: 10px 14px;
-      border-radius: 10px;
-      font-size: 13px;
-      margin-top: 16px;
-      display: none;
-    }
-    .footer-note {
-      text-align: center;
-      font-size: 12px;
-      color: #71717a;
-      margin-top: 24px;
-    }
-  </style>
-</head>
-<body>
-  <div class="login-card">
-    <div class="header-logo">
-      <div class="logo-badge">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-          <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-        </svg>
-      </div>
-      <div>
-        <h1>Chess Stealth Pro</h1>
-        <p class="subtitle">Cổng Quản Trị Key & Bảo Mật</p>
-      </div>
-    </div>
-
-    <form id="loginForm">
-      <div class="form-group">
-        <label for="password">Mật khẩu quản trị (ADMIN_PASSWORD)</label>
-        <div class="input-wrap">
-          <input type="password" id="password" required placeholder="Nhập mật khẩu quản trị..." autofocus />
-        </div>
-      </div>
-      <div id="errMsg" class="error-msg"></div>
-      <button type="submit" class="submit-btn" id="btnSubmit">
-        <span>Mở Khóa Quản Trị</span>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="9 18 15 12 9 6"></polyline>
-        </svg>
-      </button>
-    </form>
-    <div class="footer-note">Cloudflare Edge Enforced • Unguessable Route Protected</div>
-  </div>
-
-  <script>
-    const form = document.getElementById('loginForm');
-    const pwdInput = document.getElementById('password');
-    const errMsg = document.getElementById('errMsg');
-    const btn = document.getElementById('btnSubmit');
-
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      errMsg.style.display = 'none';
-      btn.disabled = true;
-      btn.style.opacity = '0.7';
-
-      try {
-        const res = await fetch('${adminBasePath}/api/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password: pwdInput.value })
-        });
-        const data = await res.json();
-        if (res.ok && data.success) {
-          window.location.reload();
-        } else {
-          errMsg.textContent = data.error || 'Mật khẩu không hợp lệ';
-          errMsg.style.display = 'block';
-        }
-      } catch (err) {
-        errMsg.textContent = 'Lỗi kết nối máy chủ Cloudflare: ' + err.message;
-        errMsg.style.display = 'block';
-      } finally {
-        btn.disabled = false;
-        btn.style.opacity = '1';
-      }
-    });
-  </script>
-</body>
-</html>`;
-}
-
-function renderAdminDashboardPage(env, frontendUrl, adminBasePath) {
-  return `<!DOCTYPE html>
-<html lang="vi" data-theme="dark">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Chess Stealth Pro — Quản Lý Key</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=JetBrains+Mono:wght@600;700&display=swap" rel="stylesheet" />
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      min-height: 100vh;
-      background: #09090b;
-      color: #f4f4f5;
-      font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
-      padding: 32px 16px;
-    }
-    .container {
-      max-width: 900px;
-      margin: 0 auto;
-    }
-    .top-nav {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 28px;
-      padding-bottom: 20px;
-      border-bottom: 1px solid #27272a;
-    }
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-    .brand-icon {
-      width: 44px;
-      height: 44px;
-      background: rgba(16, 185, 129, 0.12);
-      border: 1px solid rgba(16, 185, 129, 0.3);
-      border-radius: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #10b981;
-    }
-    .brand-title { font-size: 20px; font-weight: 800; letter-spacing: -0.02em; }
-    .brand-badge {
-      font-size: 11px;
-      font-weight: 700;
-      color: #10b981;
-      background: rgba(16, 185, 129, 0.14);
-      padding: 2px 8px;
-      border-radius: 999px;
-      margin-left: 8px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-    .logout-btn {
-      height: 40px;
-      padding: 0 16px;
-      background: #27272a;
-      color: #d4d4d8;
-      border: 1px solid #3f3f46;
-      border-radius: 10px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      transition: all 0.15s;
-    }
-    .logout-btn:hover { background: #3f3f46; color: #fff; }
-
-    /* Tabs */
-    .tab-bar {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 24px;
-    }
-    .tab-btn {
-      height: 44px;
-      padding: 0 20px;
-      background: #18181b;
-      border: 1px solid #27272a;
-      border-radius: 12px;
-      color: #a1a1aa;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      transition: all 0.15s;
-    }
-    .tab-btn.active {
-      background: rgba(16, 185, 129, 0.14);
-      border-color: #10b981;
-      color: #10b981;
-    }
-    .tab-btn:hover:not(.active) {
-      background: #27272a;
-      color: #f4f4f5;
-    }
-
-    /* Cards */
-    .card {
-      background: #18181b;
-      border: 1px solid #27272a;
-      border-radius: 16px;
-      padding: 28px;
-      margin-bottom: 24px;
-      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
-    }
-    .card-title {
-      font-size: 18px;
-      font-weight: 700;
-      margin-bottom: 8px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    .card-desc {
-      font-size: 13px;
-      color: #a1a1aa;
-      margin-bottom: 24px;
       line-height: 1.5;
     }
-
-    .form-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 16px;
-      margin-bottom: 20px;
-    }
-    .form-label {
-      font-size: 13px;
-      font-weight: 600;
-      color: #d4d4d8;
-      display: block;
-      margin-bottom: 8px;
-    }
-    select, input[type="text"] {
+    .wrapper {
       width: 100%;
-      height: 48px;
-      background: #09090b;
-      border: 1px solid #3f3f46;
-      border-radius: 12px;
-      padding: 0 16px;
-      color: #f4f4f5;
-      font-size: 14px;
-      font-family: inherit;
+      max-width: 960px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
     }
-    select:focus, input[type="text"]:focus {
-      outline: none;
-      border-color: #10b981;
-      box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+    .svg-icon {
+      width: 18px;
+      height: 18px;
+      display: inline-block;
+      vertical-align: middle;
+      stroke-width: 2;
+      stroke: currentColor;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
     }
-    .action-btn {
-      height: 48px;
-      padding: 0 24px;
-      background: #10b981;
-      color: #09090b;
-      border: none;
-      border-radius: 12px;
-      font-size: 15px;
-      font-weight: 700;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      transition: all 0.15s;
-    }
-    .action-btn:hover { background: #059669; }
 
-    /* Key Result Display Box */
-    .result-box {
-      margin-top: 24px;
-      background: #09090b;
-      border: 1px solid #3f3f46;
-      border-radius: 14px;
-      padding: 20px;
+    /* Top Navigation Header */
+    .top-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--card);
+      border: 1px solid var(--border);
+      padding: 16px 20px;
+      border-radius: 12px;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .brand-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -0.01em;
+    }
+    .brand-badge {
+      font-size: 11px;
+      font-weight: 600;
+      background: var(--green-bg);
+      color: var(--green);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      padding: 3px 8px;
+      border-radius: 6px;
+      letter-spacing: 0.02em;
+    }
+
+    /* Login Modal Overlay */
+    .login-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(9, 13, 22, 0.92);
+      backdrop-filter: blur(8px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 16px;
+    }
+    .login-box {
+      width: 100%;
+      max-width: 420px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 32px 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
+    }
+    .login-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      background: rgba(56, 189, 248, 0.12);
+      color: var(--cyan);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 4px;
+    }
+    .login-icon svg { width: 24px; height: 24px; }
+    .login-title { font-size: 20px; font-weight: 800; color: #fff; }
+    .login-desc { font-size: 13px; color: var(--text-sub); }
+    .login-err {
+      font-size: 13px;
+      color: var(--red);
+      background: var(--red-bg);
+      border: 1px solid rgba(244, 63, 94, 0.3);
+      padding: 8px 12px;
+      border-radius: 8px;
       display: none;
     }
-    .result-label {
-      font-size: 12px;
-      color: #a1a1aa;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      margin-bottom: 8px;
-      display: block;
-    }
-    .key-text {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 18px;
-      font-weight: 700;
-      color: #10b981;
-      word-break: break-all;
-      margin-bottom: 16px;
-      user-select: all;
-    }
-    .btn-row {
+    .remember-row {
       display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-    }
-    .btn-sub {
-      height: 40px;
-      padding: 0 16px;
-      background: #27272a;
-      color: #f4f4f5;
-      border: 1px solid #3f3f46;
-      border-radius: 10px;
+      align-items: center;
+      gap: 8px;
       font-size: 13px;
+      color: var(--text-sub);
+      cursor: pointer;
+    }
+    .remember-row input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      accent-color: var(--cyan);
+      cursor: pointer;
+    }
+
+    input[type="password"], input[type="text"] {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+      min-height: 44px;
+      width: 100%;
+    }
+    input[type="password"]:focus, input[type="text"]:focus {
+      border-color: var(--cyan);
+      box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: var(--primary);
+      color: #ffffff;
+      border: 1px solid transparent;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 14px;
       font-weight: 600;
+      cursor: pointer;
+      min-height: 44px;
+      min-width: 44px;
+      transition: all 0.15s ease;
+    }
+    .btn:hover {
+      background: var(--primary-hover);
+      box-shadow: 0 2px 8px rgba(2, 132, 199, 0.35);
+    }
+    .btn-secondary {
+      background: #1e293b;
+      color: var(--text);
+      border-color: #334155;
+    }
+    .btn-secondary:hover {
+      background: #334155;
+      box-shadow: none;
+    }
+    .btn-amber {
+      background: #b45309;
+      color: #ffffff;
+    }
+    .btn-amber:hover {
+      background: #d97706;
+      box-shadow: 0 2px 8px rgba(217, 119, 6, 0.35);
+    }
+    .btn-purple {
+      background: #7e22ce;
+      color: #ffffff;
+    }
+    .btn-purple:hover {
+      background: #9333ea;
+      box-shadow: 0 2px 8px rgba(147, 51, 234, 0.35);
+    }
+    .btn-emerald {
+      background: #047857;
+      color: #ffffff;
+    }
+    .btn-emerald:hover {
+      background: #059669;
+      box-shadow: 0 2px 8px rgba(5, 150, 105, 0.35);
+    }
+    .btn-danger {
+      background: var(--red-bg);
+      color: var(--red);
+      border: 1px solid rgba(244, 63, 94, 0.3);
+      padding: 6px 12px;
+      font-size: 12px;
+      min-height: 36px;
+    }
+    .btn-danger:hover {
+      background: #e11d48;
+      color: #ffffff;
+    }
+    .btn-copy {
+      background: #1e293b;
+      color: var(--cyan);
+      border: 1px solid #334155;
+      padding: 6px 10px;
+      font-size: 12px;
+      border-radius: 6px;
+      min-height: 36px;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
       gap: 6px;
+      font-weight: 500;
+      transition: all 0.15s ease;
     }
-    .btn-sub:hover { background: #3f3f46; }
+    .btn-copy:hover {
+      background: #0f172a;
+      border-color: var(--cyan);
+    }
 
-    /* Verify details table */
-    .verify-details {
-      margin-top: 20px;
-      padding-top: 16px;
-      border-top: 1px solid #27272a;
-      display: none;
-    }
-    .detail-row {
-      display: flex;
-      justify-content: space-between;
-      font-size: 13px;
-      padding: 8px 0;
-      border-bottom: 1px solid rgba(255,255,255,0.04);
-    }
-    .detail-label { color: #a1a1aa; }
-    .detail-val { font-weight: 600; color: #f4f4f5; font-family: 'JetBrains Mono', monospace; }
-
-    /* Info cards */
-    .info-grid {
+    /* Summary Stat Cards */
+    .stats-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      grid-template-columns: repeat(3, 1fr);
       gap: 16px;
     }
-    .info-card {
-      background: #09090b;
-      border: 1px solid #27272a;
-      border-radius: 12px;
-      padding: 16px;
+    @media (max-width: 768px) {
+      .stats-grid { grid-template-columns: 1fr; }
     }
-    .info-val { font-size: 15px; font-weight: 700; color: #f4f4f5; margin-top: 6px; }
+    .stat-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .stat-label {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-sub);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .stat-number {
+      font-size: 26px;
+      font-weight: 800;
+      color: var(--text);
+      font-feature-settings: "tnum";
+      font-variant-numeric: tabular-nums;
+    }
+    .stat-desc {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* Generator Action Row */
+    .gen-actions-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .gen-buttons-group {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    /* Key Inspector Box */
+    .inspector-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .card-heading {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .inspector-input-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .inspector-input-row input {
+      flex: 1;
+      min-width: 240px;
+    }
+    .inspect-result {
+      background: #0b1120;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+      display: none;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    /* Main Keys Table Container */
+    .table-container {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .table-header-tools {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .search-input-box {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #0b1120;
+      border: 1px solid var(--border);
+      padding: 0 12px;
+      border-radius: 8px;
+      flex: 1;
+      max-width: 380px;
+      min-height: 44px;
+    }
+    .search-input-box input {
+      background: transparent;
+      border: none;
+      color: var(--text);
+      outline: none;
+      width: 100%;
+      font-size: 13px;
+      padding: 0;
+      min-height: auto;
+    }
+    .filter-pills {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .filter-pill {
+      background: #1e293b;
+      color: var(--text-sub);
+      border: 1px solid #334155;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .filter-pill.active {
+      background: var(--cyan);
+      color: #090d16;
+      border-color: var(--cyan);
+    }
+
+    /* Table & Rows */
+    .table-scroll {
+      overflow-x: auto;
+      width: 100%;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 13px;
+    }
+    th {
+      background: #0b1120;
+      color: var(--text-sub);
+      font-weight: 600;
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    td {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+    tr:last-child td {
+      border-bottom: none;
+    }
+    tr:hover td {
+      background-color: rgba(56, 189, 248, 0.02);
+    }
+    .key-badge {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-weight: 700;
+      font-size: 13px;
+      color: #ffffff;
+      letter-spacing: 0.02em;
+    }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .tag-24h {
+      background: rgba(56, 189, 248, 0.12);
+      color: var(--cyan);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+    }
+    .tag-30d {
+      background: var(--purple-bg);
+      color: #c084fc;
+      border: 1px solid rgba(168, 85, 247, 0.3);
+    }
+    .tag-lifetime {
+      background: var(--green-bg);
+      color: var(--green);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+    .countdown-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 13px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-feature-settings: "tnum";
+      font-variant-numeric: tabular-nums;
+    }
+    .countdown-good {
+      background: var(--green-bg);
+      color: var(--green);
+      border: 1px solid rgba(16, 185, 129, 0.25);
+    }
+    .countdown-warning {
+      background: var(--amber-bg);
+      color: var(--amber);
+      border: 1px solid rgba(245, 158, 11, 0.25);
+    }
+    .countdown-danger {
+      background: var(--red-bg);
+      color: var(--red);
+      border: 1px solid rgba(244, 63, 94, 0.25);
+    }
+    .countdown-life {
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.4);
+    }
+    .time-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 3px;
+    }
+
+    .empty-state {
+      padding: 48px 24px;
+      text-align: center;
+      color: var(--text-muted);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+    .empty-state svg {
+      width: 40px;
+      height: 40px;
+      stroke: var(--text-muted);
+      opacity: 0.5;
+    }
+    .toast-msg {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #0f172a;
+      color: #fff;
+      border: 1px solid var(--cyan);
+      padding: 12px 18px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      display: none;
+      z-index: 1001;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    }
   </style>
 </head>
 <body>
-  <div class="container">
-    <header class="top-nav">
-      <div class="brand">
-        <div class="brand-icon">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 2L15 8L20 5L18 14H6L4 5L9 8L12 2Z"></path>
-            <path d="M5 16H19V18C19 18.55 18.55 19 18 19H6C5.45 19 5 18.55 5 18V16Z"></path>
-          </svg>
-        </div>
-        <div>
-          <span class="brand-title">Chess Stealth Pro</span>
-          <span class="brand-badge">Admin</span>
-        </div>
+  <!-- Login Screen Overlay -->
+  <div class="login-overlay" id="login-overlay">
+    <div class="login-box">
+      <div class="login-icon">
+        <svg class="svg-icon" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
       </div>
-      <button class="logout-btn" id="btnLogout">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-          <polyline points="16 17 21 12 16 7"></polyline>
-          <line x1="21" y1="12" x2="9" y2="12"></line>
-        </svg>
-        <span>Đăng Xuất</span>
-      </button>
-    </header>
-
-    <div class="tab-bar">
-      <button class="tab-btn active" id="tabGenBtn" onclick="switchTab('gen')">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21 2l-2 2m-1-1l-3 3m2 2l-6 6a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l6-6m2-2l-3-3"></path>
-        </svg>
-        <span>Tạo Key Mới</span>
-      </button>
-      <button class="tab-btn" id="tabVerifyBtn" onclick="switchTab('verify')">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="11" cy="11" r="8"></circle>
-          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-        </svg>
-        <span>Kiểm Tra Key</span>
-      </button>
-      <button class="tab-btn" id="tabSysBtn" onclick="switchTab('sys')">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
-          <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
-          <line x1="6" y1="6" x2="6.01" y2="6"></line>
-          <line x1="6" y1="18" x2="6.01" y2="18"></line>
-        </svg>
-        <span>Hệ Thống</span>
-      </button>
-    </div>
-
-    <!-- TAB 1: GENERATE KEY -->
-    <div id="tabGen" class="tab-content">
-      <div class="card">
-        <h2 class="card-title">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="20 6 9 17 4 12"></polyline>
-          </svg>
-          Tạo Mã Bản Quyền (License Key)
-        </h2>
-        <p class="card-desc">Tạo mã kích hoạt chuẩn ký số HMAC-SHA256, tương thích 100% với ứng dụng máy tính ChessPro.exe.</p>
-
-        <form id="genForm">
-          <div class="form-grid">
-            <div>
-              <label class="form-label">Loại gói / Thời hạn</label>
-              <select id="keyType">
-                <option value="trial_24h">Dùng thử 24 Giờ (FREE24H)</option>
-                <option value="week_7d">Gói Tuần 7 Ngày (PRO07D)</option>
-                <option value="monthly_30d" selected>Gói Tháng 30 Ngày (PRO30D)</option>
-                <option value="lifetime">Gói Vĩnh Viễn (LIFEVIP)</option>
-              </select>
-            </div>
-            <div>
-              <label class="form-label">Ghi chú khách hàng (Tùy chọn)</label>
-              <input type="text" id="keyNote" placeholder="Ví dụ: Anh Nam Telegram..." />
-            </div>
-          </div>
-
-          <button type="submit" class="action-btn" id="btnGen">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19"></line>
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-            </svg>
-            <span>Tạo Key Ngay</span>
-          </button>
-        </form>
-
-        <div id="genResultBox" class="result-box">
-          <span class="result-label">Mã Key Tạo Thành Công</span>
-          <div class="key-text" id="genKeyText"></div>
-          <div style="font-size: 13px; color: #a1a1aa; margin-bottom: 16px;">
-            Hết hạn vào: <strong id="genKeyExp" style="color: #f4f4f5;"></strong>
-          </div>
-          <div class="btn-row">
-            <button class="btn-sub" onclick="copyKey('genKeyText', this)">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-              </svg>
-              <span>Sao Chép Key</span>
-            </button>
-            <a id="btnActivateProtocol" href="#" class="btn-sub" style="text-decoration: none; color: #10b981; border-color: rgba(16, 185, 129, 0.4);">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-                <polyline points="15 3 21 3 21 9"></polyline>
-                <line x1="10" y1="14" x2="21" y2="3"></line>
-              </svg>
-              <span>Kích Hoạt Trực Tiếp Vào ChessPro</span>
-            </a>
-          </div>
-        </div>
+      <div>
+        <h2 class="login-title">Đăng Nhập Quản Trị</h2>
+        <p class="login-desc">Nhập mật khẩu quản trị viên để mở khóa bảng điều khiển key.</p>
       </div>
-    </div>
-
-    <!-- TAB 2: VERIFY KEY -->
-    <div id="tabVerify" class="tab-content" style="display: none;">
-      <div class="card">
-        <h2 class="card-title">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="11" cy="11" r="8"></circle>
-            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-          </svg>
-          Kiểm Tra & Giải Mã Key
-        </h2>
-        <p class="card-desc">Kiểm tra tính hợp lệ, nguồn gốc chữ ký bảo mật và hạn dùng của bất kỳ License Key nào.</p>
-
-        <form id="verifyForm">
-          <div style="margin-bottom: 16px;">
-            <label class="form-label">Dán mã License Key cần kiểm tra</label>
-            <input type="text" id="verifyInput" required placeholder="FREE24H-XXXXXX-XXXXXXXX-XXXXXX" style="font-family: 'JetBrains Mono', monospace;" />
-          </div>
-          <button type="submit" class="action-btn" style="background: #38bdf8;" id="btnVerify">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="20 6 9 17 4 12"></polyline>
-            </svg>
-            <span>Kiểm Tra Key</span>
-          </button>
-        </form>
-
-        <div id="verifyResultBox" class="result-box">
-          <div id="verifyStatusBadge" style="display: inline-block; padding: 4px 12px; border-radius: 999px; font-size: 13px; font-weight: 700; margin-bottom: 12px;"></div>
-          <div id="verifyMsg" style="font-size: 14px; color: #d4d4d8; line-height: 1.5;"></div>
-
-          <div id="verifyDetails" class="verify-details">
-            <div class="detail-row">
-              <span class="detail-label">Loại Bản Quyền</span>
-              <span class="detail-val" id="detType"></span>
-            </div>
-            <div class="detail-row">
-              <span class="detail-label">Mã Phiên (Token ID)</span>
-              <span class="detail-val" id="detToken"></span>
-            </div>
-            <div class="detail-row">
-              <span class="detail-label">Thời Hạn Hết Hạn</span>
-              <span class="detail-val" id="detExp"></span>
-            </div>
-            <div class="detail-row">
-              <span class="detail-label">Thời Gian Còn Lại</span>
-              <span class="detail-val" id="detRemain"></span>
-            </div>
-          </div>
-        </div>
+      <div class="login-err" id="login-err">Mật khẩu quản trị viên không chính xác!</div>
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <input type="password" id="modal-pw-input" placeholder="Nhập Admin Password..."/>
       </div>
-    </div>
-
-    <!-- TAB 3: SYSTEM INFO -->
-    <div id="tabSys" class="tab-content" style="display: none;">
-      <div class="card">
-        <h2 class="card-title">Trạng Thái Hệ Thống & Máy Chủ</h2>
-        <p class="card-desc">Thông số máy chủ Edge Cloudflare và cấu hình mã hóa bảo mật hiện tại.</p>
-
-        <div class="info-grid">
-          <div class="info-card">
-            <div style="font-size: 12px; color: #a1a1aa;">Edge Server Status</div>
-            <div class="info-val" style="color: #10b981;">🟢 Hoạt Động (200 OK)</div>
-          </div>
-          <div class="info-card">
-            <div style="font-size: 12px; color: #a1a1aa;">Bảo Vệ Chữ Ký</div>
-            <div class="info-val">HMAC-SHA256</div>
-          </div>
-          <div class="info-card">
-            <div style="font-size: 12px; color: #a1a1aa;">Web Lấy Key (Frontend)</div>
-            <div class="info-val" style="font-size: 13px; word-break: break-all;">${frontendUrl}</div>
-          </div>
-          <div class="info-card">
-            <div style="font-size: 12px; color: #a1a1aa;">Thời Gian Máy Chủ</div>
-            <div class="info-val" id="serverClock">--:--:--</div>
-          </div>
-        </div>
-      </div>
+      <label class="remember-row">
+        <input type="checkbox" id="modal-remember" checked/>
+        <span>Ghi nhớ phiên đăng nhập trên trình duyệt này</span>
+      </label>
+      <button class="btn" id="modal-login-btn">
+        <svg class="svg-icon" viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg>
+        <span>Xác Nhận & Đăng Nhập</span>
+      </button>
     </div>
   </div>
 
-  <script>
-    function switchTab(name) {
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+  <div class="wrapper">
+    <!-- Header -->
+    <header class="top-bar">
+      <div class="brand-title">
+        <svg class="svg-icon" viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+        <span>Chess Stealth Pro</span>
+        <span class="brand-badge">Trang Quản Trị Key</span>
+      </div>
+      <div class="auth-actions" id="auth-actions">
+        <span style="font-size:12px; color:var(--text-sub);">Quản trị viên: <b style="color:var(--green);" id="auth-status-txt">Đã kết nối</b></span>
+        <button class="btn btn-secondary" onclick="logout()" style="padding:6px 12px; min-height:36px; font-size:12px;">
+          <svg class="svg-icon" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+          <span>Đăng xuất</span>
+        </button>
+      </div>
+    </header>
 
-      if (name === 'gen') {
-        document.getElementById('tabGenBtn').classList.add('active');
-        document.getElementById('tabGen').style.display = 'block';
-      } else if (name === 'verify') {
-        document.getElementById('tabVerifyBtn').classList.add('active');
-        document.getElementById('tabVerify').style.display = 'block';
-      } else if (name === 'sys') {
-        document.getElementById('tabSysBtn').classList.add('active');
-        document.getElementById('tabSys').style.display = 'block';
+    <!-- Stat Summary Cards -->
+    <section class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-label">
+          <svg class="svg-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          <span>Key Đang Tồn Tại</span>
+        </div>
+        <div class="stat-number" id="stat-count">0</div>
+        <div class="stat-desc">Đang lưu trữ trên Cloudflare KV</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">
+          <svg class="svg-icon" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
+          <span>Các Gói Bản Quyền</span>
+        </div>
+        <div class="stat-number" style="color:var(--cyan); font-size: 20px; font-weight:700;">24H • 30 Ngày • VIP</div>
+        <div class="stat-desc">Xác thực mã hóa HMAC mật</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">
+          <svg class="svg-icon" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          <span>Cơ Chế Bảo Mật</span>
+        </div>
+        <div class="stat-number" style="color:var(--green); font-size:20px; font-weight:700;">Auto-TTL & Vĩnh Viễn</div>
+        <div class="stat-desc">Tự động xóa key hết hạn</div>
+      </div>
+    </section>
+
+    <!-- Fast Generator Bar -->
+    <section class="gen-actions-card">
+      <div style="font-size: 14px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px;">
+        <svg class="svg-icon" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        <span>Tạo Mã Key Mới Ngay:</span>
+      </div>
+      <div class="gen-buttons-group">
+        <button class="btn btn-amber" onclick="createKey('24h')">
+          <svg class="svg-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span>Tạo Key 24 Giờ</span>
+        </button>
+        <button class="btn btn-purple" onclick="createKey('30d')">
+          <svg class="svg-icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          <span>Tạo Key 30 Ngày</span>
+        </button>
+        <button class="btn btn-emerald" onclick="createKey('lifetime')">
+          <svg class="svg-icon" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          <span>Tạo Key Lifetime (Vĩnh Viễn)</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- Key Inspector Tool -->
+    <section class="inspector-card">
+      <div class="card-heading">
+        <svg class="svg-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <span>Tra cứu / Kiểm tra thời hạn của bất kỳ Key nào</span>
+      </div>
+      <div class="inspector-input-row">
+        <input type="text" id="inspect-input" placeholder="Dán mã key cần kiểm tra (FREE24H-..., PRO30D-..., LIFEVIP-...)..."/>
+        <button class="btn btn-secondary" id="inspect-btn">
+          <span>Kiểm tra</span>
+        </button>
+      </div>
+      <div class="inspect-result" id="inspect-result"></div>
+    </section>
+
+    <!-- Active Keys Table -->
+    <section class="table-container">
+      <div class="table-header-tools">
+        <div class="search-input-box">
+          <svg class="svg-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="search-input" placeholder="Lọc theo mã key hoặc loại..."/>
+        </div>
+        <div class="filter-pills">
+          <button class="filter-pill active" data-filter="all">Tất cả</button>
+          <button class="filter-pill" data-filter="24h">24 Giờ</button>
+          <button class="filter-pill" data-filter="30d">30 Ngày</button>
+          <button class="filter-pill" data-filter="lifetime">Lifetime</button>
+          <button class="btn btn-secondary" id="refresh-btn" style="min-height:36px; padding:6px 12px; margin-left:8px;">
+            <svg class="svg-icon" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            <span>Làm mới</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Mã Key Bản Quyền</th>
+              <th>Gói Bản Quyền</th>
+              <th>Thời Gian Cấp & Hết Hạn</th>
+              <th>Thời Gian Còn Lại</th>
+              <th>Trạng Thái</th>
+              <th>Thao Tác</th>
+            </tr>
+          </thead>
+          <tbody id="keys-tbody">
+            <tr>
+              <td colspan="6">
+                <div class="empty-state">
+                  <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                  <span>Chưa có dữ liệu key.</span>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <div class="toast-msg" id="toast"></div>
+
+  <script>
+    let rawKeysData = [];
+    let countdownInterval = null;
+    let currentFilterType = 'all';
+
+    const loginOverlay = document.getElementById('login-overlay');
+    const modalPwInput = document.getElementById('modal-pw-input');
+    const modalRemember = document.getElementById('modal-remember');
+    const modalLoginBtn = document.getElementById('modal-login-btn');
+    const loginErr = document.getElementById('login-err');
+
+    const refreshBtn = document.getElementById('refresh-btn');
+    const tbody = document.getElementById('keys-tbody');
+    const statCount = document.getElementById('stat-count');
+    const searchInput = document.getElementById('search-input');
+    const inspectInput = document.getElementById('inspect-input');
+    const inspectBtn = document.getElementById('inspect-btn');
+    const inspectResult = document.getElementById('inspect-result');
+    const toast = document.getElementById('toast');
+
+    function showToast(msg) {
+      toast.textContent = msg;
+      toast.style.display = 'block';
+      setTimeout(() => { toast.style.display = 'none'; }, 2500);
+    }
+
+    function getStoredPw() {
+      return localStorage.getItem('csp_admin_pw') || sessionStorage.getItem('csp_admin_pw') || '';
+    }
+
+    function savePw(pw, remember) {
+      if (remember) {
+        localStorage.setItem('csp_admin_pw', pw);
+        sessionStorage.removeItem('csp_admin_pw');
+      } else {
+        sessionStorage.setItem('csp_admin_pw', pw);
+        localStorage.removeItem('csp_admin_pw');
       }
     }
 
-    // Logout
-    document.getElementById('btnLogout').addEventListener('click', async () => {
-      await fetch('${adminBasePath}/api/logout', { method: 'POST' });
-      window.location.reload();
-    });
-
-    // Generate Key
-    document.getElementById('genForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const btn = document.getElementById('btnGen');
-      btn.disabled = true;
-      btn.style.opacity = '0.7';
-
-      try {
-        const type = document.getElementById('keyType').value;
-        const res = await fetch('${adminBasePath}/api/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type })
-        });
-        const data = await res.json();
-        if (res.ok && data.success) {
-          document.getElementById('genKeyText').textContent = data.key;
-          document.getElementById('genKeyExp').textContent = data.expDate;
-          document.getElementById('btnActivateProtocol').href = 'chesspro://activate?key=' + encodeURIComponent(data.key);
-          document.getElementById('genResultBox').style.display = 'block';
-        } else {
-          alert(data.error || 'Lỗi khi tạo key');
-        }
-      } catch (err) {
-        alert('Lỗi kết nối: ' + err.message);
-      } finally {
-        btn.disabled = false;
-        btn.style.opacity = '1';
+    function logout() {
+      localStorage.removeItem('csp_admin_pw');
+      sessionStorage.removeItem('csp_admin_pw');
+      // Remove ?auth= param from URL if present
+      if (window.location.search) {
+        window.history.replaceState({}, document.title, window.location.pathname);
       }
-    });
+      modalPwInput.value = '';
+      loginErr.style.display = 'none';
+      loginOverlay.style.display = 'flex';
+      tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state"><span>Vui lòng đăng nhập để xem danh sách key.</span></div></td></tr>';
+      statCount.textContent = '0';
+      if (countdownInterval) clearInterval(countdownInterval);
+    }
 
-    // Verify Key
-    document.getElementById('verifyForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const btn = document.getElementById('btnVerify');
-      const box = document.getElementById('verifyResultBox');
-      const badge = document.getElementById('verifyStatusBadge');
-      const msg = document.getElementById('verifyMsg');
-      const details = document.getElementById('verifyDetails');
-
-      btn.disabled = true;
-      btn.style.opacity = '0.7';
+    async function tryLogin(pw, remember) {
+      loginErr.style.display = 'none';
+      modalLoginBtn.disabled = true;
+      modalLoginBtn.style.opacity = '0.7';
 
       try {
-        const key = document.getElementById('verifyInput').value;
-        const res = await fetch('${adminBasePath}/api/verify', {
+        const res = await fetch('${adminBasePath}/api/keys?auth=' + encodeURIComponent(pw));
+        if (!res.ok) {
+          loginErr.textContent = 'Mật khẩu quản trị viên không chính xác!';
+          loginErr.style.display = 'block';
+          modalLoginBtn.disabled = false;
+          modalLoginBtn.style.opacity = '1';
+          loginOverlay.style.display = 'flex';
+          return false;
+        }
+
+        savePw(pw, remember);
+        loginOverlay.style.display = 'none';
+        modalLoginBtn.disabled = false;
+        modalLoginBtn.style.opacity = '1';
+
+        // Clean up URL if auth param was passed
+        if (window.location.search.includes('auth=')) {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+
+        const data = await res.json();
+        rawKeysData = data.keys || [];
+        statCount.textContent = rawKeysData.length;
+        renderKeysTable();
+        startLiveCountdown();
+        return true;
+      } catch (err) {
+        loginErr.textContent = 'Lỗi kết nối tới Cloudflare: ' + err.message;
+        loginErr.style.display = 'block';
+        modalLoginBtn.disabled = false;
+        modalLoginBtn.style.opacity = '1';
+        return false;
+      }
+    }
+
+    async function loadKeys() {
+      const pw = getStoredPw();
+      if (!pw) {
+        loginOverlay.style.display = 'flex';
+        return;
+      }
+      try {
+        const res = await fetch('${adminBasePath}/api/keys?auth=' + encodeURIComponent(pw));
+        if (!res.ok) {
+          logout();
+          return;
+        }
+        const data = await res.json();
+        rawKeysData = data.keys || [];
+        statCount.textContent = rawKeysData.length;
+        renderKeysTable();
+        startLiveCountdown();
+      } catch (_) {}
+    }
+
+    function formatTimeRemaining(sec, isLife) {
+      if (isLife) {
+        return {
+          str: 'VĨNH VIỄN',
+          readable: 'Bản quyền trọn đời (VIP)',
+          class: 'countdown-life'
+        };
+      }
+      if (sec <= 0) return { str: 'Đã hết hạn', readable: 'Hết hiệu lực', class: 'countdown-danger' };
+      const d = Math.floor(sec / 86400);
+      const h = Math.floor((sec % 86400) / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = sec % 60;
+      let cls = 'countdown-good';
+      if (d === 0 && h < 3) cls = 'countdown-danger';
+      else if (d === 0 && h < 12) cls = 'countdown-warning';
+
+      let str = '';
+      let readable = '';
+      if (d > 0) {
+        str = \`\${d}d \${h.toString().padStart(2, '0')}:\${m.toString().padStart(2, '0')}:\${s.toString().padStart(2, '0')}\`;
+        readable = \`Còn \${d} ngày \${h} giờ\`;
+      } else {
+        str = \`\${h.toString().padStart(2, '0')}:\${m.toString().padStart(2, '0')}:\${s.toString().padStart(2, '0')}\`;
+        readable = \`Còn \${h} giờ \${m} phút\`;
+      }
+
+      return { str, readable, class: cls };
+    }
+
+    function renderKeysTable() {
+      const search = (searchInput.value || '').toLowerCase().trim();
+      const filtered = rawKeysData.filter(k => {
+        const keyUpper = (k.key || '').toUpperCase();
+        let matchesFilter = true;
+        if (currentFilterType === '24h') matchesFilter = keyUpper.startsWith('FREE24H') || k.type === '24h';
+        else if (currentFilterType === '30d') matchesFilter = keyUpper.startsWith('PRO30D') || k.type === '30d';
+        else if (currentFilterType === 'lifetime') matchesFilter = keyUpper.startsWith('LIFEVIP') || k.type === 'lifetime' || k.isLifetime;
+
+        if (!matchesFilter) return false;
+        if (!search) return true;
+        return k.key.toLowerCase().includes(search) || (k.provider || '').toLowerCase().includes(search) || (k.type || '').toLowerCase().includes(search);
+      });
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = \`<tr><td colspan="6"><div class="empty-state"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><span>\${rawKeysData.length === 0 ? "Hiện tại chưa có key nào trong Cloudflare KV. Bấm các nút phía trên để tạo key mới." : "Không tìm thấy key nào khớp với bộ lọc."}</span></div></td></tr>\`;
+        return;
+      }
+
+      const now = Math.floor(Date.now() / 1000);
+      tbody.innerHTML = filtered.map(k => {
+        const isLife = k.type === 'lifetime' || k.isLifetime || (k.key && k.key.startsWith('LIFEVIP'));
+        const is30D = k.type === '30d' || (k.key && k.key.startsWith('PRO30D'));
+        const remSec = isLife ? null : Math.max(0, k.expSec - now);
+        const rem = formatTimeRemaining(remSec, isLife);
+        const createdDate = new Date(k.createdAt * 1000).toLocaleString('vi-VN');
+        const expDate = isLife ? 'Không giới hạn (Vĩnh viễn)' : new Date(k.expSec * 1000).toLocaleString('vi-VN');
+
+        let tagHtml = '<span class="tag tag-24h">24 GIỜ</span>';
+        if (isLife) {
+          tagHtml = '<span class="tag tag-lifetime">LIFETIME VIP</span>';
+        } else if (is30D) {
+          tagHtml = '<span class="tag tag-30d">30 NGÀY</span>';
+        }
+
+        return \`
+          <tr id="row-\${k.key}">
+            <td>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span class="key-badge">\${k.key}</span>
+                <button class="btn-copy" onclick="copyKey('\${k.key}')" title="Sao chép key">
+                  <svg class="svg-icon" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  <span>Chép</span>
+                </button>
+              </div>
+            </td>
+            <td>
+              \${tagHtml}
+              <div class="time-sub">Nguồn: \${(k.provider || 'ADMIN').toUpperCase()}</div>
+            </td>
+            <td>
+              <div>\${createdDate}</div>
+              <div class="time-sub">Hết hạn: \${expDate}</div>
+            </td>
+            <td>
+              <span class="countdown-pill \${rem.class}" id="timer-\${k.key}">\${rem.str}</span>
+              <div class="time-sub" id="subtimer-\${k.key}">\${rem.readable}</div>
+            </td>
+            <td>
+              <span class="tag" style="background:var(--green-bg); color:var(--green); border:1px solid rgba(16,185,129,0.3);">
+                HOẠT ĐỘNG
+              </span>
+            </td>
+            <td>
+              <button class="btn btn-danger" onclick="revokeKey('\${k.key}')" title="Thu hồi / Khóa key">
+                <svg class="svg-icon" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                <span>Khóa key</span>
+              </button>
+            </td>
+          </tr>
+        \`;
+      }).join('');
+    }
+
+    function startLiveCountdown() {
+      if (countdownInterval) clearInterval(countdownInterval);
+      countdownInterval = setInterval(() => {
+        const now = Math.floor(Date.now() / 1000);
+        rawKeysData.forEach(k => {
+          const isLife = k.type === 'lifetime' || k.isLifetime || (k.key && k.key.startsWith('LIFEVIP'));
+          if (isLife) return;
+          const remSec = Math.max(0, k.expSec - now);
+          const rem = formatTimeRemaining(remSec, false);
+          const el = document.getElementById('timer-' + k.key);
+          const subEl = document.getElementById('subtimer-' + k.key);
+          if (el) {
+            el.textContent = rem.str;
+            el.className = 'countdown-pill ' + rem.class;
+          }
+          if (subEl) {
+            subEl.textContent = rem.readable;
+          }
+        });
+      }, 1000);
+    }
+
+    function copyKey(k) {
+      navigator.clipboard.writeText(k);
+      showToast('Đã sao chép: ' + k);
+    }
+
+    async function revokeKey(key) {
+      if (!confirm('XÁC NHẬN KHÓA KEY:\\nBạn có chắc chắn muốn hủy kích hoạt mã key này ngay lập tức?\\n\\n' + key)) return;
+      const pw = getStoredPw();
+      try {
+        const res = await fetch('${adminBasePath}/api/revoke?auth=' + encodeURIComponent(pw), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ key })
         });
-        const data = await res.json();
-        box.style.display = 'block';
-
-        if (data.valid) {
-          badge.style.background = 'rgba(16, 185, 129, 0.14)';
-          badge.style.color = '#10b981';
-          badge.textContent = 'KEY HỢP LỆ VÀ ĐANG HOẠT ĐỘNG';
-          msg.textContent = data.message;
-          details.style.display = 'block';
-          document.getElementById('detType').textContent = data.prefix;
-          document.getElementById('detToken').textContent = data.tokenId;
-          document.getElementById('detExp').textContent = data.expDate;
-          const h = Math.floor(data.remainingSec / 3600);
-          const m = Math.floor((data.remainingSec % 3600) / 60);
-          document.getElementById('detRemain').textContent = h + ' giờ ' + m + ' phút';
+        const d = await res.json();
+        if (d.success) {
+          showToast('Đã khóa và hủy key thành công');
+          loadKeys();
         } else {
-          badge.style.background = 'rgba(239, 68, 68, 0.14)';
-          badge.style.color = '#ef4444';
-          badge.textContent = data.isExpired ? 'KEY ĐÃ HẾT HẠN' : 'KEY KHÔNG HỢP LỆ';
-          msg.textContent = data.error || data.message;
-          details.style.display = 'none';
+          alert('Lỗi: ' + (d.error || 'Không thể khóa key'));
         }
       } catch (err) {
-        alert('Lỗi kiểm tra: ' + err.message);
-      } finally {
-        btn.disabled = false;
-        btn.style.opacity = '1';
-      }
-    });
-
-    // Copy helper
-    async function copyKey(elementId, btn) {
-      const text = document.getElementById(elementId).textContent;
-      try {
-        await navigator.clipboard.writeText(text);
-        const original = btn.innerHTML;
-        btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg><span style="color:#10b981">Đã Sao Chép!</span>';
-        setTimeout(() => { btn.innerHTML = original; }, 2000);
-      } catch (_) {
-        alert('Đã chọn key, vui lòng nhấn Ctrl+C để copy');
+        alert('Lỗi mạng: ' + err.message);
       }
     }
 
-    // Live Clock
-    setInterval(() => {
-      document.getElementById('serverClock').textContent = new Date().toLocaleTimeString('vi-VN');
-    }, 1000);
+    async function createKey(type) {
+      const pw = getStoredPw();
+      if (!pw) { alert('Vui lòng đăng nhập mật khẩu Admin trước!'); return; }
+      try {
+        const res = await fetch('${adminBasePath}/api/generate?auth=' + encodeURIComponent(pw), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type })
+        });
+        const d = await res.json();
+        if (d.success) {
+          showToast('Tạo thành công key ' + type.toUpperCase() + ': ' + d.key);
+          loadKeys();
+        } else {
+          alert('Lỗi: ' + (d.error || 'Không tạo được key'));
+        }
+      } catch (err) {
+        alert('Lỗi: ' + err.message);
+      }
+    }
+
+    async function inspectKey() {
+      const keyVal = inspectInput.value.trim().toUpperCase();
+      if (!keyVal) { alert('Vui lòng dán mã key cần kiểm tra!'); return; }
+      inspectResult.style.display = 'block';
+      inspectResult.innerHTML = 'Đang kiểm tra chữ ký số và dữ liệu...';
+      try {
+        const res = await fetch('/api/check-key?key=' + encodeURIComponent(keyVal));
+        const d = await res.json();
+        if (!res.ok) {
+          inspectResult.innerHTML = \`<div style="color:var(--red);"><b>Không hợp lệ:</b> \${d.error || 'Sai định dạng'}</div>\`;
+          return;
+        }
+
+        const expDate = d.isLifetime ? 'Vĩnh viễn (Không giới hạn)' : new Date(d.expiresAt).toLocaleString('vi-VN');
+        const statusHtml = d.valid
+          ? \`<span style="color:var(--green); font-weight:700;">HỢP LỆ (Đang hoạt động)</span>\`
+          : (d.expired ? \`<span style="color:var(--red); font-weight:700;">HẾT HẠN</span>\` : \`<span style="color:var(--red); font-weight:700;">ĐÃ BỊ KHÓA / SAI CHỮ KÝ</span>\`);
+
+        const timeInfo = d.isLifetime
+          ? '<b style="color:var(--green);">Bản Quyền Vĩnh Viễn (Lifetime VIP)</b>'
+          : \`<b style="color:var(--cyan);">\${d.hoursLeft} Giờ</b> (\${d.minutesLeft} phút)\`;
+
+        inspectResult.innerHTML = \`
+          <div><b>Mã Key:</b> <span style="font-family:monospace; color:#fff;">\${d.key}</span></div>
+          <div><b>Gói Bản Quyền:</b> <span style="font-weight:700; color:var(--cyan);">\${d.typeName}</span></div>
+          <div><b>Trạng Thái:</b> \${statusHtml}</div>
+          <div><b>Thời Gian Còn Lại:</b> \${timeInfo}</div>
+          <div><b>Thời Điểm Hết Hạn:</b> \${expDate}</div>
+          <div><b>Chữ Ký Mật HMAC:</b> \${d.signatureValid ? '<span style="color:var(--green)">Chuẩn xác (Server gốc)</span>' : '<span style="color:var(--red)">Giả mạo</span>'}</div>
+        \`;
+      } catch (e) {
+        inspectResult.innerHTML = \`<div style="color:var(--red);">Lỗi: \${e.message}</div>\`;
+      }
+    }
+
+    modalLoginBtn.addEventListener('click', () => {
+      const pw = modalPwInput.value.trim();
+      if (!pw) {
+        loginErr.textContent = 'Vui lòng nhập mật khẩu quản trị!';
+        loginErr.style.display = 'block';
+        return;
+      }
+      tryLogin(pw, modalRemember.checked);
+    });
+
+    modalPwInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') modalLoginBtn.click();
+    });
+
+    refreshBtn.addEventListener('click', loadKeys);
+    searchInput.addEventListener('input', renderKeysTable);
+    inspectBtn.addEventListener('click', inspectKey);
+
+    document.querySelectorAll('.filter-pill').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        document.querySelectorAll('.filter-pill').forEach(b => b.classList.remove('active'));
+        e.target.classList.add('active');
+        currentFilterType = e.target.getAttribute('data-filter');
+        renderKeysTable();
+      });
+    });
+
+    // Initial check: if auth param in URL or stored in browser
+    const urlParams = new URLSearchParams(window.location.search);
+    const paramAuth = urlParams.get('auth');
+    const existingPw = getStoredPw();
+
+    if (paramAuth) {
+      tryLogin(paramAuth, true);
+    } else if (existingPw) {
+      tryLogin(existingPw, true);
+    } else {
+      loginOverlay.style.display = 'flex';
+    }
   </script>
 </body>
 </html>`;
-}
+      return new Response(html, {
+        headers: { "Content-Type": "text/html; charset=utf-8" },
+      });
+    }
+
+    // Redirect /admin to secret slug
+    if (url.pathname === "/admin" || url.pathname === "/admin/") {
+      const target = new URL(`${url.origin}${adminBasePath}`);
+      url.searchParams.forEach((v, k) => target.searchParams.set(k, v));
+      return Response.redirect(target.toString(), 302);
+    }
+
+    // Default: Redirect to frontend
+    return Response.redirect(frontendUrl, 302);
+  },
+};

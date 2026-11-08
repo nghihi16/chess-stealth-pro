@@ -7,3 +7,7 @@ workers_dev = true
 [vars]
 SECRET_KEY = "CHESS_STEALTH_PRO_WEB24H_SECRET_2026"
 FRONTEND_URL = "https://nghihi16.github.io/chess-stealth-pro"
+
+[[kv_namespaces]]
+binding = "KEYS_KV"
+id = "ced431432f0d46ad9f8644ccc3232952"
