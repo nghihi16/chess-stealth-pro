@@ -24,7 +24,7 @@ if %errorlevel% neq 0 (
     echo.
     echo ============================================================
     echo [+] Trien khai hoan tat!
-    echo     API Worker: https://chess-stealth-key-api.pubgclone123-vn.workers.dev
+    echo     API Worker: https://chess-stealth-key-api.quitworks.workers.dev
     echo ============================================================
 )
 pause
