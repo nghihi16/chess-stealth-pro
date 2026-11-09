@@ -24,6 +24,7 @@ from PySide6.QtGui import (
     QPolygonF,
     QShortcut,
 )
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -87,6 +88,7 @@ arrow_state = {
     "move": "",
     "depth": "",
     "last_seen": 0.0,
+    "last_ping": 0.0,
     "offset_y": 0,
     "auto_aligned": False,
     "qcolor": QColor(245, 158, 11, 230),
@@ -935,293 +937,1233 @@ def build_brand_header() -> QWidget:
     return w
 
 
+SUN_SVG = """<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='#f5f5f7' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>
+  <circle cx='12' cy='12' r='4'/>
+  <path d='M12 2v2'/><path d='M12 20v2'/><path d='m4.93 4.93 1.41 1.41'/><path d='m17.66 17.66 1.41 1.41'/>
+  <path d='M2 12h2'/><path d='M20 12h2'/><path d='m6.34 17.66-1.41 1.41'/><path d='m19.07 4.93-1.41 1.41'/>
+</svg>"""
+
+MOON_SVG = """<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='#1d1d1f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>
+  <path d='M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z'/>
+</svg>"""
+
+LOGOUT_KEY_SVG = """<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>
+  <path d='m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4'/>
+  <path d='m21 2-9.6 9.6'/>
+  <circle cx='7.5' cy='15.5' r='5.5'/>
+</svg>"""
+
+PALETTE_SVG = """<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>
+  <circle cx='13.5' cy='6.5' r='.5' fill='currentColor'/>
+  <circle cx='17.5' cy='10.5' r='.5' fill='currentColor'/>
+  <circle cx='8.5' cy='7.5' r='.5' fill='currentColor'/>
+  <circle cx='6.5' cy='12.5' r='.5' fill='currentColor'/>
+  <path d='M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z'/>
+</svg>"""
+
+
+def render_svg_icon(svg_str: str, size: int = 16, color_override: str = None) -> QPixmap:
+    if color_override:
+        svg_str = svg_str.replace("stroke='currentColor'", f"stroke='{color_override}'").replace("fill='currentColor'", f"fill='{color_override}'")
+    renderer = QSvgRenderer(QByteArray(svg_str.encode("utf-8")))
+    pix = QPixmap(size, size)
+    pix.fill(QColor(0, 0, 0, 0))
+    p = QPainter(pix)
+    renderer.render(p)
+    p.end()
+    return pix
+
+
+AVAILABLE_ENGINES = [
+    {
+        "id": "sf_20",
+        "name": "Stockfish 16",
+        "details": "Level 20 • ~3500 ELO (Maximum)",
+        "icon": "icon_engine_stockfish.png",
+        "skill": 20,
+    },
+    {
+        "id": "sf_16",
+        "name": "Stockfish 16",
+        "details": "Level 16 • ~2600 ELO (Grandmaster)",
+        "icon": "icon_engine_stockfish.png",
+        "skill": 16,
+    },
+    {
+        "id": "sf_12",
+        "name": "Stockfish 16",
+        "details": "Level 12 • ~2000 ELO (Master)",
+        "icon": "icon_engine_stockfish.png",
+        "skill": 12,
+    },
+    {
+        "id": "komodo_dragon",
+        "name": "Dragon 3.3 by Komodo",
+        "details": "MCTS Tactical • ~3450 ELO",
+        "icon": "icon_engine_komodo.png",
+        "skill": 20,
+    },
+    {
+        "id": "lc0",
+        "name": "Leela Chess Zero (Lc0)",
+        "details": "Deep Neural Net • ~3400 ELO",
+        "icon": "icon_engine_lc0.png",
+        "skill": 20,
+    },
+    {
+        "id": "maia_1900",
+        "name": "Maia Chess 1900",
+        "details": "Human Master Style • ~1900 ELO",
+        "icon": "icon_engine_maia.png",
+        "skill": 12,
+    },
+    {
+        "id": "maia_1500",
+        "name": "Maia Chess 1500",
+        "details": "Human Club Style • ~1500 ELO",
+        "icon": "icon_engine_maia.png",
+        "skill": 8,
+    },
+    {
+        "id": "maia_1100",
+        "name": "Maia Chess 1100",
+        "details": "Human Casual Style • ~1100 ELO",
+        "icon": "icon_engine_maia.png",
+        "skill": 4,
+    },
+]
+
+
 def _build_qss(theme: str) -> str:
-    if theme == "light":
-        return """
-        QWidget#Root { background-color: #f1f5f9; color: #0f172a; font-family: 'Segoe UI'; }
-        QFrame#Card { background-color: #ffffff; border: 1px solid #cbd5e1; border-radius: 16px; }
-        QLabel#BrandChess { color: #0f172a; font-size: 16px; font-weight: 800; }
-        QLabel#BrandStealth { color: #0284c7; font-size: 10px; font-weight: 800; }
-        QLabel#SectionTitle { color: #334155; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
-        QLineEdit {
-            background-color: #f8fafc; color: #0f172a;
-            border: 1px solid #cbd5e1; border-radius: 10px;
-            padding: 10px 12px; font-family: 'Consolas'; font-size: 14px; font-weight: 700;
-        }
-        QLineEdit:focus { border: 2px solid #0284c7; background-color: #ffffff; }
-        QPushButton#PrimaryBtn {
-            background-color: #0284c7; color: #ffffff;
-            border: none; border-radius: 10px;
-            min-height: 44px; font-size: 13px; font-weight: 700;
-        }
-        QPushButton#PrimaryBtn:hover { background-color: #0369a1; }
-        QPushButton#SecondaryBtn {
-            background-color: #ffffff; color: #0f172a;
-            border: 1px solid #cbd5e1; border-radius: 10px;
-            min-height: 38px; font-size: 12px; font-weight: 600; padding: 0 12px;
-        }
-        QPushButton#SecondaryBtn:hover { border: 1px solid #0284c7; background-color: #f8fafc; }
-        QPushButton#ToggleBtnActive {
-            background-color: #059669; color: #ffffff;
-            border: 2px solid #10b981; border-radius: 12px;
-            min-height: 48px; font-size: 14px; font-weight: 800; letter-spacing: 0.04em;
-        }
-        QPushButton#ToggleBtnActive:hover { background-color: #047857; }
-        QPushButton#ToggleBtnPaused {
-            background-color: #dc2626; color: #ffffff;
-            border: 2px solid #ef4444; border-radius: 12px;
-            min-height: 48px; font-size: 14px; font-weight: 800; letter-spacing: 0.04em;
-        }
-        QPushButton#ToggleBtnPaused:hover { background-color: #b91c1c; }
-        QPushButton.BrowserCard {
-            background-color: #f8fafc; color: #0f172a;
-            border: 1px solid #cbd5e1; border-radius: 12px;
-            min-height: 46px; font-size: 12px; font-weight: 700;
-            text-align: left; padding: 6px 12px;
-        }
-        QPushButton.BrowserCard:hover { border: 1px solid #0284c7; background-color: #eef2f6; }
-        QFrame#SubControlContainer {
-            background-color: #f8fafc;
-            border: 1px solid #cbd5e1;
-            border-radius: 8px;
-        }
-        QPushButton.SegmentBtn {
-            background-color: transparent;
-            color: #64748b;
-            font-size: 11px;
-            font-weight: 600;
-            border: none;
-            border-radius: 6px;
-            padding: 5px 10px;
-            min-height: 22px;
-        }
-        QPushButton.SegmentBtn:hover {
-            background-color: #e2e8f0;
-            color: #0f172a;
-        }
-        QPushButton.SegmentBtnActive {
-            background-color: #0284c7;
-            color: #ffffff;
-            font-size: 11px;
-            font-weight: 800;
-            border: none;
-            border-radius: 6px;
-            padding: 5px 10px;
-            min-height: 22px;
-        }
-        QPushButton.StepperBtn {
-            background-color: #e2e8f0;
-            color: #0f172a;
-            border: 1px solid #cbd5e1;
-            border-radius: 6px;
-            font-size: 11px;
+    chev_dark = get_asset_path("chevron_dark.png").replace("\\", "/")
+    chev_light = get_asset_path("chevron_light.png").replace("\\", "/")
+    if theme == "dark":
+        return f"""
+        QWidget#Root {{ background-color: #090B10; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif; }}
+        QLabel#BrandTitle {{
+            font-family: -apple-system, "Segoe UI", sans-serif;
+            font-size: 16px;
             font-weight: 700;
-            min-height: 24px;
-            padding: 0 4px;
-        }
-        QPushButton.StepperBtn:hover {
-            background-color: #cbd5e1;
-            border: 1px solid #0284c7;
-        }
-        QLabel#StepperVal {
-            color: #0f172a;
-            font-family: 'Consolas';
-            font-size: 12px;
+            color: #FFFFFF;
+        }}
+        QPushButton#ThemeIconBtn {{
+            background-color: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 8px;
+            min-width: 32px; max-width: 32px;
+            min-height: 32px; max-height: 32px;
+        }}
+        QPushButton#ThemeIconBtn:hover {{
+            background-color: rgba(255, 255, 255, 0.12);
+            border-color: rgba(255, 255, 255, 0.22);
+        }}
+        QPushButton#WindowCtrlBtn, QPushButton#WindowCloseBtn {{
+            background-color: transparent;
+            color: #A1A1AA;
+            border: none;
+            border-radius: 6px;
+            min-width: 28px; max-width: 28px;
+            min-height: 28px; max-height: 28px;
+            font-size: 13px;
+            font-weight: 700;
+        }}
+        QPushButton#WindowCtrlBtn:hover {{
+            background-color: rgba(255, 255, 255, 0.10);
+            color: #FFFFFF;
+        }}
+        QPushButton#WindowCloseBtn:hover {{
+            background-color: rgba(255, 255, 255, 0.16);
+            color: #FFFFFF;
+        }}
+        QFrame#StatusCard {{
+            background-color: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 14px;
+        }}
+        QLabel#StatusPill[state="live"] {{
+            background-color: rgba(16, 185, 129, 0.16);
+            color: #34D399;
+            border: 1px solid rgba(16, 185, 129, 0.28);
+            border-radius: 6px;
+            padding: 2px 8px;
+            font-family: -apple-system, "Segoe UI", sans-serif;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.6px;
+        }}
+        QLabel#StatusPill[state="waiting"] {{
+            background-color: rgba(255, 255, 255, 0.06);
+            color: #A1A1AA;
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            border-radius: 6px;
+            padding: 2px 8px;
+            font-family: -apple-system, "Segoe UI", sans-serif;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.6px;
+        }}
+        QLabel#StatusPill[state="offline"] {{
+            background-color: rgba(239, 68, 68, 0.15);
+            color: #F87171;
+            border: 1px solid rgba(239, 68, 68, 0.28);
+            border-radius: 6px;
+            padding: 2px 8px;
+            font-family: -apple-system, "Segoe UI", sans-serif;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.6px;
+        }}
+        QLabel#MetaText {{
+            color: #71717A;
+            font-family: -apple-system, "Segoe UI", sans-serif;
+            font-size: 11px;
+            font-weight: 500;
+        }}
+        QLabel#SquareBadge {{
+            background-color: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 8px;
+            padding: 2px 10px;
+            color: #FFFFFF;
+            font-family: -apple-system, "SF Pro Display", "Segoe UI", sans-serif;
+            font-size: 20px;
             font-weight: 800;
-            min-width: 44px;
-        }
-        QComboBox {
-            background-color: #f8fafc; color: #0f172a;
-            border: 1px solid #cbd5e1; border-radius: 8px;
-            padding: 6px 12px; font-size: 12px; font-weight: 600;
-        }
-        QComboBox:hover { border: 1px solid #0284c7; }
-        QComboBox::drop-down { border: none; width: 20px; }
-        QComboBox QAbstractItemView {
-            background-color: #ffffff; color: #0f172a;
-            border: 1px solid #cbd5e1; selection-background-color: #e2e8f0;
-            selection-color: #0284c7;
-        }
+            letter-spacing: 0.5px;
+        }}
+        QLabel#MoveArrow {{
+            color: #A1A1AA;
+            font-size: 18px;
+            font-weight: 600;
+        }}
+        QLabel#ReadyBig[state="ready"] {{
+            color: #FFFFFF;
+            font-family: -apple-system, "SF Pro Display", "Segoe UI", sans-serif;
+            font-size: 26px;
+            font-weight: 800;
+            letter-spacing: 1px;
+        }}
+        QLabel#ReadyBig[state="deactivated"] {{
+            color: #F87171;
+            font-family: -apple-system, "SF Pro Display", "Segoe UI", sans-serif;
+            font-size: 24px;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+        }}
+        QLabel#EvalChip {{
+            background-color: rgba(16, 185, 129, 0.16);
+            color: #10B981;
+            border: 1px solid rgba(16, 185, 129, 0.30);
+            border-radius: 8px;
+            padding: 3px 12px;
+            font-family: -apple-system, "SF Pro Display", "Segoe UI", sans-serif;
+            font-size: 16px;
+            font-weight: 700;
+        }}
+        QLabel#SubDetail {{
+            color: #A1A1AA;
+            font-family: -apple-system, "Segoe UI", sans-serif;
+            font-size: 11px;
+        }}
+        QLabel#SectionHeader {{
+            font-family: -apple-system, "Segoe UI", sans-serif;
+            font-size: 12px;
+            font-weight: 600;
+            color: #E4E4E7;
+        }}
+        QFrame#EngineCard {{
+            background-color: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+        }}
+        QFrame#EngineCard:hover {{
+            background-color: rgba(255, 255, 255, 0.07);
+            border: 1px solid rgba(255, 255, 255, 0.16);
+        }}
+        QLabel#EngineTitle {{
+            font-family: -apple-system, "Segoe UI", sans-serif;
+            font-size: 13px;
+            font-weight: 700;
+            color: #FFFFFF;
+        }}
+        QLabel#EngineSub {{
+            font-family: -apple-system, "Segoe UI", sans-serif;
+            font-size: 11px;
+            color: #A1A1AA;
+        }}
+        QPushButton#MainActionBtnDeactivate {{
+            background-color: rgba(255, 255, 255, 0.05);
+            color: #FFFFFF;
+            border: 1px solid rgba(255, 255, 255, 0.20);
+            font-family: -apple-system, "Segoe UI", sans-serif;
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            border-radius: 12px;
+        }}
+        QPushButton#MainActionBtnDeactivate:hover {{
+            background-color: rgba(239, 68, 68, 0.18);
+            border-color: rgba(239, 68, 68, 0.50);
+            color: #EF4444;
+        }}
+        QPushButton#MainActionBtnActivate {{
+            background-color: #FFFFFF;
+            color: #090B10;
+            font-family: -apple-system, "Segoe UI", sans-serif;
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            border: none;
+            border-radius: 12px;
+        }}
+        QPushButton#MainActionBtnActivate:hover {{
+            background-color: #F4F4F5;
+        }}
         """
-    return """
-    QWidget#Root { background-color: #060911; color: #f8fafc; font-family: 'Segoe UI'; }
-    QFrame#Card { background-color: #0d121e; border: 1px solid #1e293b; border-radius: 16px; }
-    QLabel#BrandChess { color: #f8fafc; font-size: 16px; font-weight: 800; }
-    QLabel#BrandStealth { color: #22d3ee; font-size: 10px; font-weight: 800; }
-    QLabel#SectionTitle { color: #94a3b8; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
-    QLineEdit {
-        background-color: #161e2e; color: #f8fafc;
-        border: 1px solid #283548; border-radius: 10px;
-        padding: 10px 12px; font-family: 'Consolas'; font-size: 14px; font-weight: 700;
-    }
-    QLineEdit:focus { border: 2px solid #22d3ee; background-color: #1a2436; }
-    QPushButton#PrimaryBtn {
-        background-color: #22d3ee; color: #060911;
-        border: none; border-radius: 10px;
-        min-height: 44px; font-size: 13px; font-weight: 800;
-    }
-    QPushButton#PrimaryBtn:hover { background-color: #38bdf8; }
-    QPushButton#SecondaryBtn {
-        background-color: #161e2e; color: #f8fafc;
-        border: 1px solid #283548; border-radius: 10px;
-        min-height: 38px; font-size: 12px; font-weight: 600; padding: 0 12px;
-    }
-    QPushButton#SecondaryBtn:hover { border: 1px solid #22d3ee; background-color: #1e293b; }
-    QPushButton#ToggleBtnActive {
-        background-color: #059669; color: #f8fafc;
-        border: 2px solid #34d399; border-radius: 12px;
-        min-height: 48px; font-size: 14px; font-weight: 800; letter-spacing: 0.04em;
-    }
-    QPushButton#ToggleBtnActive:hover { background-color: #10b981; }
-    QPushButton#ToggleBtnPaused {
-        background-color: #7f1d1d; color: #fca5a5;
-        border: 2px solid #ef4444; border-radius: 12px;
-        min-height: 48px; font-size: 14px; font-weight: 800; letter-spacing: 0.04em;
-    }
-    QPushButton#ToggleBtnPaused:hover { background-color: #991b1b; }
-    QPushButton.BrowserCard {
-        background-color: #161e2e; color: #f8fafc;
-        border: 1px solid #283548; border-radius: 12px;
-        min-height: 46px; font-size: 12px; font-weight: 700;
-        text-align: left; padding: 6px 12px;
-    }
-    QPushButton.BrowserCard:hover { border: 1px solid #22d3ee; background-color: #1e293b; }
-    QFrame#SubControlContainer {
-        background-color: #161e2e;
-        border: 1px solid #283548;
-        border-radius: 8px;
-    }
-    QPushButton.SegmentBtn {
-        background-color: transparent;
-        color: #94a3b8;
-        font-size: 11px;
-        font-weight: 600;
-        border: none;
-        border-radius: 6px;
-        padding: 5px 10px;
-        min-height: 22px;
-    }
-    QPushButton.SegmentBtn:hover {
-        background-color: #1e293b;
-        color: #f8fafc;
-    }
-    QPushButton.SegmentBtnActive {
-        background-color: #22d3ee;
-        color: #060911;
-        font-size: 11px;
-        font-weight: 800;
-        border: none;
-        border-radius: 6px;
-        padding: 5px 10px;
-        min-height: 22px;
-    }
-    QPushButton.StepperBtn {
-        background-color: #1e293b;
-        color: #f8fafc;
-        border: 1px solid #334155;
-        border-radius: 6px;
-        font-size: 11px;
-        font-weight: 700;
-        min-height: 24px;
-        padding: 0 4px;
-    }
-    QPushButton.StepperBtn:hover {
-        background-color: #283548;
-        border: 1px solid #22d3ee;
-    }
-    QLabel#StepperVal {
-        color: #f8fafc;
-        font-family: 'Consolas';
-        font-size: 12px;
-        font-weight: 800;
-        min-width: 44px;
-    }
-    QComboBox {
-        background-color: #161e2e; color: #f8fafc;
-        border: 1px solid #283548; border-radius: 8px;
-        padding: 6px 12px; font-size: 12px; font-weight: 600;
-    }
-    QComboBox:hover { border: 1px solid #22d3ee; }
-    QComboBox::drop-down { border: none; width: 20px; }
-    QComboBox QAbstractItemView {
-        background-color: #0d121e; color: #f8fafc;
-        border: 1px solid #1e293b; selection-background-color: #1e293b;
-        selection-color: #22d3ee;
-    }
-    """
+    else:
+        return f"""
+        QWidget#Root {{ background-color: #FFFFFF; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif; }}
+        QLabel#BrandTitle {{
+            font-family: -apple-system, "Segoe UI", sans-serif;
+            font-size: 16px;
+            font-weight: 700;
+            color: #090B10;
+        }}
+        QPushButton#ThemeIconBtn {{
+            background-color: #FFFFFF;
+            border: 1px solid rgba(0, 0, 0, 0.12);
+            border-radius: 8px;
+            min-width: 32px; max-width: 32px;
+            min-height: 32px; max-height: 32px;
+        }}
+        QPushButton#ThemeIconBtn:hover {{
+            background-color: #F4F4F5;
+            border-color: rgba(0, 0, 0, 0.20);
+        }}
+        QPushButton#WindowCtrlBtn, QPushButton#WindowCloseBtn {{
+            background-color: transparent;
+            color: #71717A;
+            border: none;
+            border-radius: 6px;
+            min-width: 28px; max-width: 28px;
+            min-height: 28px; max-height: 28px;
+            font-size: 13px;
+            font-weight: 700;
+        }}
+        QPushButton#WindowCtrlBtn:hover {{
+            background-color: rgba(0, 0, 0, 0.06);
+            color: #090B10;
+        }}
+        QPushButton#WindowCloseBtn:hover {{
+            background-color: rgba(0, 0, 0, 0.10);
+            color: #090B10;
+        }}
+        QFrame#StatusCard {{
+            background-color: #FFFFFF;
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            border-radius: 14px;
+        }}
+        QLabel#StatusPill[state="live"] {{
+            background-color: rgba(5, 150, 105, 0.10);
+            color: #059669;
+            border: 1px solid rgba(5, 150, 105, 0.20);
+            border-radius: 6px;
+            padding: 2px 8px;
+            font-family: -apple-system, "Segoe UI", sans-serif;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.6px;
+        }}
+        QLabel#StatusPill[state="waiting"] {{
+            background-color: #F4F4F5;
+            color: #52525B;
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            border-radius: 6px;
+            padding: 2px 8px;
+            font-family: -apple-system, "Segoe UI", sans-serif;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.6px;
+        }}
+        QLabel#StatusPill[state="offline"] {{
+            background-color: #FEF2F2;
+            color: #DC2626;
+            border: 1px solid rgba(220, 38, 38, 0.25);
+            border-radius: 6px;
+            padding: 2px 8px;
+            font-family: -apple-system, "Segoe UI", sans-serif;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.6px;
+        }}
+        QLabel#MetaText {{
+            color: #71717A;
+            font-family: -apple-system, "Segoe UI", sans-serif;
+            font-size: 11px;
+            font-weight: 500;
+        }}
+        QLabel#SquareBadge {{
+            background-color: #F4F4F5;
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            border-radius: 8px;
+            padding: 2px 10px;
+            color: #090B10;
+            font-family: -apple-system, "SF Pro Display", "Segoe UI", sans-serif;
+            font-size: 20px;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+        }}
+        QLabel#MoveArrow {{
+            color: #71717A;
+            font-size: 18px;
+            font-weight: 600;
+        }}
+        QLabel#ReadyBig[state="ready"] {{
+            color: #090B10;
+            font-family: -apple-system, "SF Pro Display", "Segoe UI", sans-serif;
+            font-size: 26px;
+            font-weight: 800;
+            letter-spacing: 1px;
+        }}
+        QLabel#ReadyBig[state="deactivated"] {{
+            color: #DC2626;
+            font-family: -apple-system, "SF Pro Display", "Segoe UI", sans-serif;
+            font-size: 24px;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+        }}
+        QLabel#EvalChip {{
+            background-color: rgba(5, 150, 105, 0.10);
+            color: #059669;
+            border: 1px solid rgba(5, 150, 105, 0.20);
+            border-radius: 8px;
+            padding: 3px 12px;
+            font-family: -apple-system, "SF Pro Display", "Segoe UI", sans-serif;
+            font-size: 16px;
+            font-weight: 700;
+        }}
+        QLabel#SubDetail {{
+            color: #71717A;
+            font-family: -apple-system, "Segoe UI", sans-serif;
+            font-size: 11px;
+        }}
+        QLabel#SectionHeader {{
+            font-family: -apple-system, "Segoe UI", sans-serif;
+            font-size: 12px;
+            font-weight: 600;
+            color: #27272A;
+        }}
+        QFrame#EngineCard {{
+            background-color: #FFFFFF;
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            border-radius: 12px;
+        }}
+        QFrame#EngineCard:hover {{
+            background-color: #FFFFFF;
+            border: 1px solid rgba(0, 0, 0, 0.18);
+        }}
+        QLabel#EngineTitle {{
+            font-family: -apple-system, "Segoe UI", sans-serif;
+            font-size: 13px;
+            font-weight: 700;
+            color: #090B10;
+        }}
+        QLabel#EngineSub {{
+            font-family: -apple-system, "Segoe UI", sans-serif;
+            font-size: 11px;
+            color: #52525B;
+        }}
+        QPushButton#MainActionBtnDeactivate {{
+            background-color: #FFFFFF;
+            color: #090B10;
+            border: 1px solid rgba(0, 0, 0, 0.18);
+            font-family: -apple-system, "Segoe UI", sans-serif;
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            border-radius: 12px;
+        }}
+        QPushButton#MainActionBtnDeactivate:hover {{
+            background-color: #FEE2E2;
+            border-color: rgba(220, 38, 38, 0.45);
+            color: #B91C1C;
+        }}
+        QPushButton#MainActionBtnActivate {{
+            background-color: #18181B;
+            color: #FFFFFF;
+            font-family: -apple-system, "Segoe UI", sans-serif;
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            border: none;
+            border-radius: 12px;
+        }}
+        QPushButton#MainActionBtnActivate:hover {{
+            background-color: #27272A;
+        }}
+        """
 
 
-# ================= COLOR SWATCH PALETTE COMPONENT =================
-class ColorSwatch(QPushButton):
-    def __init__(self, name: str, qcolor: QColor, on_select, parent=None):
+class MetallicWordmarkLabel(QLabel):
+    def __init__(self, text: str = "PRO", theme: str = "dark", parent=None):
         super().__init__(parent)
-        self.name = name
-        self.qcolor = qcolor
-        self.on_select = on_select
-        self.is_active = False
-        self.is_hovered = False
+        self.wordmark = text
+        self.theme = theme
+        self.setFont(QFont("Segoe UI", 9, QFont.Weight.Black))
+        self.setFixedSize(40 if text == "FREE" else 32, 18)
 
-        self.setFixedSize(38, 38)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip(name)
-        self.setAccessibleName(name)
-        self.clicked.connect(lambda: self.on_select(self.name))
-
-    def enterEvent(self, event):
-        self.is_hovered = True
+    def set_data(self, text: str, theme: str):
+        self.wordmark = text
+        self.theme = theme
+        self.setFixedSize(40 if text == "FREE" else 32, 18)
         self.update()
-        super().enterEvent(event)
-
-    def leaveEvent(self, event):
-        self.is_hovered = False
-        self.update()
-        super().leaveEvent(event)
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        font = self.font()
+        font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.3)
+        painter.setFont(font)
 
-        rect = self.rect()
-        cx = rect.center().x()
-        cy = rect.center().y()
-        r = 13.0
+        grad = QLinearGradient(0, 2, 0, 16)
+        if self.theme == "dark":
+            if self.wordmark == "PRO":
+                grad.setColorAt(0.0, QColor("#FFFFFF"))
+                grad.setColorAt(0.35, QColor("#E2E8F0"))
+                grad.setColorAt(0.65, QColor("#94A3B8"))
+                grad.setColorAt(1.0, QColor("#CBD5E1"))
+            else:
+                grad.setColorAt(0.0, QColor("#CBD5E1"))
+                grad.setColorAt(0.50, QColor("#94A3B8"))
+                grad.setColorAt(1.0, QColor("#64748B"))
+        else:
+            if self.wordmark == "PRO":
+                grad.setColorAt(0.0, QColor("#0F172A"))
+                grad.setColorAt(0.35, QColor("#334155"))
+                grad.setColorAt(0.65, QColor("#64748B"))
+                grad.setColorAt(1.0, QColor("#1E293B"))
+            else:
+                grad.setColorAt(0.0, QColor("#64748B"))
+                grad.setColorAt(0.50, QColor("#475569"))
+                grad.setColorAt(1.0, QColor("#0F172A"))
 
-        is_dark = (_CURRENT_THEME == "dark")
+        painter.setPen(QPen(grad, 1))
+        painter.drawText(self.rect(), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.wordmark)
+        painter.end()
 
-        if self.is_active:
-            # Soft glowing halo
-            halo_pen = QPen(QColor(self.qcolor.red(), self.qcolor.green(), self.qcolor.blue(), 100), 5.0)
-            painter.setPen(halo_pen)
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawEllipse(cx - 16, cy - 16, 32, 32)
 
-            # Sharp outer contrast ring
-            ring_color = QColor(255, 255, 255, 240) if is_dark else QColor(15, 23, 42, 220)
-            ring_pen = QPen(ring_color, 2.2)
-            painter.setPen(ring_pen)
-            painter.drawEllipse(cx - 16, cy - 16, 32, 32)
-        elif self.is_hovered:
-            hover_color = QColor(255, 255, 255, 140) if is_dark else QColor(0, 0, 0, 90)
-            hover_pen = QPen(hover_color, 1.8)
-            painter.setPen(hover_pen)
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawEllipse(cx - 15, cy - 15, 30, 30)
-            r = 13.5
+class LuxuryStatusCard(QFrame):
+    def __init__(self, theme: str = "dark", parent=None):
+        super().__init__(parent)
+        self.theme = theme
+        self.setObjectName("StatusCard")
+        self.setFixedHeight(106)
+        self._build_ui()
 
-        # Inner color fill
-        painter.setPen(QPen(QColor(0, 0, 0, 35), 1.0))
-        painter.setBrush(QBrush(self.qcolor))
-        painter.drawEllipse(cx - r, cy - r, r * 2, r * 2)
+    def _build_ui(self):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 12, 16, 12)
+        lay.setSpacing(6)
 
-        # High-contrast vector checkmark for selected state
-        if self.is_active:
-            lum = 0.299 * self.qcolor.red() + 0.587 * self.qcolor.green() + 0.114 * self.qcolor.blue()
-            check_color = QColor(15, 23, 42) if lum > 165 else QColor(255, 255, 255)
+        top_row = QHBoxLayout()
+        top_row.setContentsMargins(0, 0, 0, 0)
+        self.status_pill = QLabel("●  LIVE LOCKED")
+        self.status_pill.setObjectName("StatusPill")
+        top_row.addWidget(self.status_pill)
+        top_row.addStretch()
 
-            pen = QPen(check_color, 2.4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
-            painter.setPen(pen)
-            painter.drawLine(cx - 4.5, cy - 0.5, cx - 1.5, cy + 3.0)
-            painter.drawLine(cx - 1.5, cy + 3.0, cx + 5.0, cy - 3.5)
+        self.meta_lbl = QLabel("Depth 15  •  Stockfish 16")
+        self.meta_lbl.setObjectName("MetaText")
+        top_row.addWidget(self.meta_lbl)
+        lay.addLayout(top_row)
+
+        self.hero_row = QHBoxLayout()
+        self.hero_row.setContentsMargins(0, 2, 0, 2)
+        self.hero_row.setSpacing(8)
+
+        self.from_sq = QLabel("E2")
+        self.from_sq.setObjectName("SquareBadge")
+        self.hero_row.addWidget(self.from_sq)
+
+        self.arrow_sym = QLabel("→")
+        self.arrow_sym.setObjectName("MoveArrow")
+        self.hero_row.addWidget(self.arrow_sym)
+
+        self.to_sq = QLabel("E4")
+        self.to_sq.setObjectName("SquareBadge")
+        self.hero_row.addWidget(self.to_sq)
+
+        self.ready_big = QLabel("READY")
+        self.ready_big.setObjectName("ReadyBig")
+        self.ready_big.hide()
+        self.hero_row.addWidget(self.ready_big)
+
+        self.hero_row.addStretch()
+
+        self.eval_chip = QLabel("+0.45")
+        self.eval_chip.setObjectName("EvalChip")
+        self.hero_row.addWidget(self.eval_chip)
+        lay.addLayout(self.hero_row)
+
+        self.sub_lbl = QLabel("White Pawn  •  Recommended Move")
+        self.sub_lbl.setObjectName("SubDetail")
+        lay.addWidget(self.sub_lbl)
+
+    def show_live_move(self, from_sq: str, to_sq: str, eval_str: str, piece: str, depth: str):
+        self.from_sq.show()
+        self.arrow_sym.show()
+        self.to_sq.show()
+        self.eval_chip.show()
+        self.ready_big.hide()
+
+        self.from_sq.setText(from_sq.upper())
+        self.to_sq.setText(to_sq.upper())
+        self.eval_chip.setText(eval_str)
+        self.status_pill.setText("●  LIVE")
+        self.status_pill.setProperty("state", "live")
+        self.meta_lbl.setText(f"Depth {depth}  •  0.3s")
+        self.sub_lbl.setText(f"{piece}  •  Recommended Move")
+        self._refresh_styles()
+
+    def show_waiting(self, is_connected: bool = True):
+        self.from_sq.hide()
+        self.arrow_sym.hide()
+        self.to_sq.hide()
+        self.eval_chip.hide()
+        self.ready_big.show()
+
+        self.ready_big.setText("READY")
+        self.ready_big.setProperty("state", "ready")
+        self.status_pill.setText("●  CONNECTED" if is_connected else "●  WAITING")
+        self.status_pill.setProperty("state", "waiting")
+        self.meta_lbl.setText("Chess.com Engine")
+        self.sub_lbl.setText("Start a game on Chess.com to detect moves")
+        self._refresh_styles()
+
+    def show_deactivated(self):
+        self.from_sq.hide()
+        self.arrow_sym.hide()
+        self.to_sq.hide()
+        self.eval_chip.hide()
+        self.ready_big.show()
+
+        self.ready_big.setText("DEACTIVATED")
+        self.ready_big.setProperty("state", "deactivated")
+        self.status_pill.setText("●  OFFLINE")
+        self.status_pill.setProperty("state", "offline")
+        self.meta_lbl.setText("Assist Paused")
+        self.sub_lbl.setText("Click ACTIVATE to resume live analysis")
+        self._refresh_styles()
+
+    def _refresh_styles(self):
+        self.status_pill.style().unpolish(self.status_pill)
+        self.status_pill.style().polish(self.status_pill)
+        self.ready_big.style().unpolish(self.ready_big)
+        self.ready_big.style().polish(self.ready_big)
+
+
+class ArrowPreviewWidget(QWidget):
+    def __init__(self, color: QColor, theme: str = "light", parent=None):
+        super().__init__(parent)
+        self.arrow_color = color
+        self.theme = theme
+        self.setFixedHeight(46)
+
+    def set_color(self, color: QColor):
+        self.arrow_color = color
+        self.update()
+
+    def set_theme(self, theme: str):
+        self.theme = theme
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        w, h = float(self.width()), float(self.height())
+        bg_rect = QRectF(0.5, 0.5, w - 1.0, h - 1.0)
+        bg_col = QColor(255, 255, 255) if self.theme == "light" else QColor(255, 255, 255, 12)
+        border_col = QColor(0, 0, 0, 24) if self.theme == "light" else QColor(255, 255, 255, 24)
+        p.setBrush(bg_col)
+        p.setPen(QPen(border_col, 1))
+        p.drawRoundedRect(bg_rect, 10, 10)
+
+        arrow_len = 86.0
+        cx = w / 2.0
+        shaft_start_x = cx - (arrow_len / 2.0)
+        head_tip_x = cx + (arrow_len / 2.0)
+        head_len = 18.0
+        head_base_x = head_tip_x - head_len
+        cy = h / 2.0
+        shaft_half_thick = 5.0
+        head_half_thick = 12.0
+
+        poly = QPolygonF([
+            QPointF(shaft_start_x, cy - shaft_half_thick),
+            QPointF(head_base_x, cy - shaft_half_thick),
+            QPointF(head_base_x, cy - head_half_thick),
+            QPointF(head_tip_x, cy),
+            QPointF(head_base_x, cy + head_half_thick),
+            QPointF(head_base_x, cy + shaft_half_thick),
+            QPointF(shaft_start_x, cy + shaft_half_thick),
+        ])
+
+        p.setBrush(self.arrow_color)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawPolygon(poly)
+        p.end()
+
+
+class ColorPickerButton(QPushButton):
+    def __init__(self, color: QColor, on_color_changed=None, theme: str = "light", parent=None):
+        super().__init__(parent)
+        self.current_color = color
+        self.on_color_changed = on_color_changed
+        self.theme = theme
+        self.setFixedSize(68, 46)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.clicked.connect(self._open_dialog)
+
+    def set_color(self, color: QColor):
+        self.current_color = color
+        self.update()
+
+    def set_theme(self, theme: str):
+        self.theme = theme
+        self.update()
+
+    def _open_dialog(self):
+        new_color = QColorDialog.getColor(
+            self.current_color,
+            self.window(),
+            "Choose Arrow Color (RGB)",
+            QColorDialog.ColorDialogOption.ShowAlphaChannel,
+        )
+        if new_color.isValid():
+            self.current_color = new_color
+            self.update()
+            if self.on_color_changed:
+                self.on_color_changed(new_color)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        rect = QRectF(0.5, 0.5, self.width() - 1.0, self.height() - 1.0)
+        bg_col = QColor(255, 255, 255) if self.theme == "light" else QColor(255, 255, 255, 14)
+        border_col = QColor(0, 0, 0, 28) if self.theme == "light" else QColor(255, 255, 255, 28)
+        p.setBrush(bg_col)
+        p.setPen(QPen(border_col, 1))
+        p.drawRoundedRect(rect, 10, 10)
+
+        swatch_rect = QRectF(8, 8, 30, 30)
+        p.setBrush(self.current_color)
+        p.setPen(QPen(QColor(0, 0, 0, 35) if self.theme == "light" else QColor(255, 255, 255, 60), 1))
+        p.drawRoundedRect(swatch_rect, 7, 7)
+
+        icon_pix = render_svg_icon(PALETTE_SVG, 16, "#4B5563" if self.theme == "light" else "#9CA3AF")
+        p.drawPixmap(44, 15, icon_pix)
+        p.end()
+
+
+class ColorSwatch(QPushButton):
+    def __init__(self, name: str, color: QColor, on_click=None, parent=None):
+        super().__init__(parent)
+        self.name = name
+        self.color = color
+        self.on_click = on_click
+        self.is_active = False
+        self.setFixedSize(36, 36)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.clicked.connect(self._handle_click)
+
+    def _handle_click(self):
+        if self.on_click:
+            self.on_click(self.name)
+
+    def set_active(self, active: bool):
+        self.is_active = active
+        self.update()
+
+
+class EngineCard(QFrame):
+    def __init__(self, engine_name: str = "Stockfish 16", details: str = "Level 20 • ~3500 ELO (Maximum)", icon_file: str = "icon_engine_stockfish.png", on_select=None, theme: str = "light", parent=None):
+        super().__init__(parent)
+        self.setObjectName("EngineCard")
+        self.engine_name = engine_name
+        self.details = details
+        self.icon_file = icon_file
+        self.on_select = on_select
+        self.theme = theme
+        self.setFixedHeight(56)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 8, 14, 8)
+        layout.setSpacing(12)
+
+        self.icon_box = QLabel()
+        self.icon_box.setObjectName("EngineIconBox")
+        self.icon_box.setFixedSize(38, 38)
+        self.icon_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.icon_box.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        layout.addWidget(self.icon_box)
+
+        text_col = QVBoxLayout()
+        text_col.setSpacing(2)
+        text_col.setContentsMargins(0, 0, 0, 0)
+        self.title_lbl = QLabel(self.engine_name)
+        self.title_lbl.setObjectName("EngineTitle")
+        self.title_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.sub_lbl = QLabel(self.details)
+        self.sub_lbl.setObjectName("EngineSub")
+        self.sub_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        text_col.addWidget(self.title_lbl)
+        text_col.addWidget(self.sub_lbl)
+        layout.addLayout(text_col, 1)
+
+        self.chevron_lbl = QLabel()
+        self.chevron_lbl.setObjectName("EngineChevron")
+        self.chevron_lbl.setFixedSize(16, 16)
+        self.chevron_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.chevron_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        layout.addWidget(self.chevron_lbl)
+
+        self._update_assets()
+
+    def set_data(self, name: str, details: str, icon_file: str = "icon_engine_stockfish.png"):
+        self.engine_name = name
+        self.details = details
+        self.icon_file = icon_file
+        self.title_lbl.setText(name)
+        self.sub_lbl.setText(details)
+        self._update_assets()
+
+    def set_theme(self, theme: str):
+        self.theme = theme
+        self._update_assets()
+
+    def _update_assets(self):
+        chev_file = "chevron_dark.png" if self.theme == "light" else "chevron_light.png"
+        chev_p = get_asset_path(chev_file)
+        if os.path.exists(chev_p):
+            self.chevron_lbl.setPixmap(QPixmap(chev_p).scaled(10, 10, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+
+        icon_p = get_asset_path(self.icon_file)
+        if os.path.exists(icon_p):
+            pix = QPixmap(icon_p).scaled(34, 34, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            self.icon_box.setPixmap(pix)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._show_engine_menu()
+        super().mousePressEvent(event)
+
+    def _show_engine_menu(self):
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #18181B;
+                color: #F4F4F5;
+                border: 1px solid rgba(255, 255, 255, 0.15);
+                border-radius: 8px;
+                padding: 6px;
+                font-family: -apple-system, "Segoe UI", sans-serif;
+                font-size: 13px;
+            }
+            QMenu::item {
+                padding: 8px 24px 8px 12px;
+                border-radius: 6px;
+            }
+            QMenu::item:selected {
+                background-color: rgba(255, 255, 255, 0.12);
+            }
+        """ if self.theme == "dark" else """
+            QMenu {
+                background-color: #FFFFFF;
+                color: #18181B;
+                border: 1px solid rgba(0, 0, 0, 0.12);
+                border-radius: 8px;
+                padding: 6px;
+                font-family: -apple-system, "Segoe UI", sans-serif;
+                font-size: 13px;
+            }
+            QMenu::item {
+                padding: 8px 24px 8px 12px;
+                border-radius: 6px;
+            }
+            QMenu::item:selected {
+                background-color: #F4F4F5;
+            }
+        """)
+
+        for eng in AVAILABLE_ENGINES:
+            action_text = f"{eng['name']}  —  {eng['details']}"
+            act = QAction(action_text, menu)
+            ic_p = get_asset_path(eng["icon"])
+            if os.path.exists(ic_p):
+                act.setIcon(QIcon(ic_p))
+            def _make_handler(target_eng=eng):
+                def _h():
+                    self.set_data(target_eng["name"], target_eng["details"], target_eng["icon"])
+                    if self.on_select:
+                        self.on_select(target_eng)
+                return _h
+            act.triggered.connect(_make_handler(eng))
+            menu.addAction(act)
+
+        menu.exec(self.mapToGlobal(QPointF(0, self.height()).toPoint()))
+
+
+class ControlCenterWindow(QWidget):
+    def __init__(self, active_key: str, hwid: str):
+        super().__init__()
+        self.active_key = active_key
+        self.hwid = hwid
+        self.setObjectName("Root")
+        self.setWindowTitle("Chess Stealth")
+        self.setWindowIcon(app_icon())
+        self.setFixedWidth(380)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self._drag_pos = None
+
+        self.active_color_name = "Orange (Classic)"
+        self.swatches = {
+            name: ColorSwatch(name, qc, self._on_color_changed)
+            for name, qc in COLOR_PRESETS.items()
+        }
+        if "Orange (Classic)" in self.swatches:
+            self.swatches["Orange (Classic)"].is_active = True
+
+        self._theme_shortcut = QShortcut(QKeySequence("Ctrl+T"), self)
+        self._theme_shortcut.activated.connect(self._toggle_theme)
+
+        ensure_overlay_running(active_key, hwid)
+        install_scripts_and_extension()
+
+        self._build_ui()
+        self.setStyleSheet(_build_qss(_CURRENT_THEME))
+        self.adjustSize()
+
+        self._last_rendered_sig = None
+        self.status_timer = QTimer(self)
+        self.status_timer.timeout.connect(self._sync_live_status)
+        self.status_timer.start(250)
+
+    @property
+    def color_combo(self):
+        class _Proxy:
+            def __init__(self, p): self.p = p
+            def currentText(self): return self.p.active_color_name
+        return _Proxy(self)
+
+    @property
+    def side_combo(self):
+        class _Proxy:
+            def __init__(self, p): self.p = p
+            def currentData(self): return arrow_state.get("side", "auto")
+        return _Proxy(self)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.MouseButton.LeftButton and hasattr(self, "_drag_pos") and self._drag_pos is not None:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(0.5, 0.5, self.width() - 1.0, self.height() - 1.0), 16, 16)
+        p.setClipPath(path)
+        bg_col = QColor("#090B10") if _CURRENT_THEME == "dark" else QColor("#FFFFFF")
+        p.fillRect(self.rect(), bg_col)
+        p.setClipping(False)
+
+        border_pen = QPen(QColor(255, 255, 255, 25) if _CURRENT_THEME == "dark" else QColor(0, 0, 0, 24), 1)
+        p.setPen(border_pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(QRectF(0.5, 0.5, self.width() - 1.0, self.height() - 1.0), 16, 16)
+
+    def closeEvent(self, event):
+        event.accept()
+        if hasattr(self, "status_timer") and self.status_timer.isActive():
+            self.status_timer.stop()
+
+    def _key_tier_wordmark(self) -> str:
+        k = (self.active_key or "").upper()
+        if k.startswith("LIFEVIP-") or k.startswith("PRO30D-"):
+            return "PRO"
+        return "FREE"
+
+    def _update_brand_logo(self):
+        icon_name = "queen_light.png" if _CURRENT_THEME == "dark" else "queen_dark.png"
+        icon_path = get_asset_path(icon_name)
+        if hasattr(self, "brand_logo_lbl") and os.path.exists(icon_path):
+            pix = QPixmap(icon_path).scaled(20, 20, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            self.brand_logo_lbl.setPixmap(pix)
+
+    def _update_logout_icon(self):
+        col = "#FFFFFF" if _CURRENT_THEME == "dark" else "#0F172A"
+        icon_pix = render_svg_icon(LOGOUT_KEY_SVG, 15, col)
+        self.logout_btn.setIcon(QIcon(icon_pix))
+        self.logout_btn.setIconSize(QSize(15, 15))
+
+    def _logout_key(self):
+        reply = QMessageBox.question(
+            self,
+            "Đổi Key / Đăng xuất",
+            "Bạn có chắc muốn đăng xuất mã key hiện tại để nhập key khác không?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                if os.path.exists(CONFIG_FILE):
+                    os.remove(CONFIG_FILE)
+                cache_f = os.path.join(APP_DIR, "verified_session.json")
+                if os.path.exists(cache_f):
+                    os.remove(cache_f)
+            except Exception:
+                pass
+            self.close()
+            def open_control_center(k: str):
+                ctrl = ControlCenterWindow(k, self.hwid)
+                _ACTIVE_WINDOWS.append(ctrl)
+                ctrl.show()
+            win = ActivationWindow(self.hwid, open_control_center)
+            _ACTIVE_WINDOWS.append(win)
+            win.show()
+
+    def _update_theme_icon(self):
+        icon_pix = render_svg_icon(SUN_SVG if _CURRENT_THEME == "dark" else MOON_SVG, 16)
+        self.theme_btn.setIcon(QIcon(icon_pix))
+        self.theme_btn.setIconSize(QSize(16, 16))
+
+    def _build_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 16, 18, 20)
+        root.setSpacing(14)
+
+        # 1. Header Bar: Queen Logo + Chess Stealth + PRO + Logout + Theme + Min + Close
+        top = QHBoxLayout()
+        top.setSpacing(8)
+
+        self.brand_logo_lbl = QLabel()
+        self._update_brand_logo()
+        top.addWidget(self.brand_logo_lbl)
+
+        title = QLabel("Chess Stealth")
+        title.setObjectName("BrandTitle")
+        top.addWidget(title)
+
+        tier_txt = self._key_tier_wordmark()
+        self.pro_lbl = MetallicWordmarkLabel(tier_txt, _CURRENT_THEME)
+        top.addWidget(self.pro_lbl)
+
+        top.addStretch()
+
+        self.logout_btn = QPushButton()
+        self.logout_btn.setObjectName("ThemeIconBtn")
+        self.logout_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.logout_btn.setToolTip("Đổi Key / Đăng xuất")
+        self._update_logout_icon()
+        self.logout_btn.clicked.connect(self._logout_key)
+        top.addWidget(self.logout_btn)
+
+        self.theme_btn = QPushButton()
+        self.theme_btn.setObjectName("ThemeIconBtn")
+        self.theme_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._update_theme_icon()
+        self.theme_btn.clicked.connect(self._toggle_theme)
+        top.addWidget(self.theme_btn)
+
+        self.min_btn = QPushButton("—")
+        self.min_btn.setObjectName("WindowCtrlBtn")
+        self.min_btn.setFixedSize(28, 28)
+        self.min_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.min_btn.setToolTip("Minimize")
+        self.min_btn.clicked.connect(self.showMinimized)
+        top.addWidget(self.min_btn)
+
+        self.close_btn = QPushButton("✕")
+        self.close_btn.setObjectName("WindowCloseBtn")
+        self.close_btn.setFixedSize(28, 28)
+        self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.close_btn.setToolTip("Close")
+        self.close_btn.clicked.connect(self.close)
+        top.addWidget(self.close_btn)
+
+        root.addLayout(top)
+
+        # 2. Status Card (Luxury tactical move badges & status pill)
+        self.status_card = LuxuryStatusCard(theme=_CURRENT_THEME)
+        root.addWidget(self.status_card)
+
+        # 3. Engine Section
+        eng_sec = QVBoxLayout()
+        eng_sec.setSpacing(6)
+        lbl_eng = QLabel("Engine")
+        lbl_eng.setObjectName("SectionHeader")
+        eng_sec.addWidget(lbl_eng)
+
+        self.engine_card = EngineCard(
+            engine_name="Stockfish 16",
+            details="Level 20 • ~3500 ELO (Maximum)",
+            icon_file="icon_engine_stockfish.png",
+            on_select=self._on_engine_selected,
+            theme=_CURRENT_THEME,
+        )
+        eng_sec.addWidget(self.engine_card)
+        root.addLayout(eng_sec)
+
+        # 4. Arrow Color Section
+        arr_sec = QVBoxLayout()
+        arr_sec.setSpacing(6)
+        lbl_arr = QLabel("Arrow Color")
+        lbl_arr.setObjectName("SectionHeader")
+        arr_sec.addWidget(lbl_arr)
+
+        arr_row = QHBoxLayout()
+        arr_row.setSpacing(10)
+
+        cur_color = arrow_state.get("qcolor", QColor(245, 158, 11, 230))
+        self.color_btn = ColorPickerButton(
+            cur_color,
+            on_color_changed=self._on_rgb_color_picked,
+            theme=_CURRENT_THEME,
+        )
+        arr_row.addWidget(self.color_btn)
+
+        self.arrow_preview = ArrowPreviewWidget(cur_color, theme=_CURRENT_THEME)
+        arr_row.addWidget(self.arrow_preview, 1)
+        arr_sec.addLayout(arr_row)
+        root.addLayout(arr_sec)
+
+        # 5. Bottom Action Button: DEACTIVATE when running, ACTIVATE when paused
+        self.action_btn = QPushButton("DEACTIVATE" if arrow_state["enabled"] else "ACTIVATE")
+        self.action_btn.setObjectName("MainActionBtnDeactivate" if arrow_state["enabled"] else "MainActionBtnActivate")
+        self.action_btn.setFixedHeight(44)
+        self.action_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.action_btn.clicked.connect(self._toggle_assist)
+        root.addWidget(self.action_btn)
+
+    def _on_engine_selected(self, eng_data: dict):
+        skill_val = eng_data.get("skill", 20)
+        arrow_state["skill"] = int(skill_val)
+        depth_map = {20: (15, 250), 16: (13, 180), 12: (11, 140), 8: (9, 100), 4: (7, 80)}
+        d_val, mt_val = depth_map.get(int(skill_val), (15, 250))
+        arrow_state["target_depth"] = d_val
+        arrow_state["movetime"] = mt_val
+
+    def _on_rgb_color_picked(self, new_color: QColor):
+        arrow_state["qcolor"] = new_color
+        self.arrow_preview.set_color(new_color)
+        if _OVERLAY_INSTANCE is not None:
+            _OVERLAY_INSTANCE.update()
+
+    def _on_color_changed(self, color_name: str):
+        if color_name in COLOR_PRESETS:
+            self.active_color_name = color_name
+            for name, sw in self.swatches.items():
+                sw.set_active(name == color_name)
+            self._on_rgb_color_picked(COLOR_PRESETS[color_name])
+
+    def _on_side_changed(self, side: str):
+        arrow_state["side"] = side
+
+    def _toggle_theme(self):
+        global _CURRENT_THEME
+        _CURRENT_THEME = "light" if _CURRENT_THEME == "dark" else "dark"
+        self.setStyleSheet(_build_qss(_CURRENT_THEME))
+        self._update_brand_logo()
+        self._update_theme_icon()
+        self._update_logout_icon()
+        self.pro_lbl.set_data(self._key_tier_wordmark(), _CURRENT_THEME)
+        self.status_card.theme = _CURRENT_THEME
+        self.engine_card.set_theme(_CURRENT_THEME)
+        self.color_btn.set_theme(_CURRENT_THEME)
+        self.arrow_preview.set_theme(_CURRENT_THEME)
+        self._last_rendered_sig = None
+        self._sync_live_status()
+        self.update()
+
+    def _toggle_assist(self):
+        arrow_state["enabled"] = not arrow_state["enabled"]
+        if not arrow_state["enabled"]:
+            arrow_state["show"] = False
+            if _OVERLAY_INSTANCE is not None:
+                _OVERLAY_INSTANCE.update()
+            self.action_btn.setObjectName("MainActionBtnActivate")
+            self.action_btn.setText("ACTIVATE")
+        else:
+            if _OVERLAY_INSTANCE is not None:
+                _OVERLAY_INSTANCE.showFullScreen()
+                _OVERLAY_INSTANCE.update()
+            self.action_btn.setObjectName("MainActionBtnDeactivate")
+            self.action_btn.setText("DEACTIVATE")
+
+        self.action_btn.style().unpolish(self.action_btn)
+        self.action_btn.style().polish(self.action_btn)
+        self._last_rendered_sig = None
+        self._sync_live_status()
+
+    def _sync_live_status(self):
+        now = time.time()
+        is_connected = (now - arrow_state.get("last_ping", 0.0) <= 2.5)
+        is_showing_move = arrow_state.get("show", False) and (now - arrow_state.get("last_seen", 0.0) <= 1.5) and bool(arrow_state.get("move", ""))
+
+        current_sig = (
+            arrow_state.get("enabled", True),
+            is_showing_move,
+            arrow_state.get("move", "") if is_showing_move else "",
+            arrow_state.get("depth", "") if is_showing_move else "",
+            arrow_state.get("eval", "") if is_showing_move else "",
+            arrow_state.get("ponder", "") if is_showing_move else "",
+            arrow_state.get("piece", "") if is_showing_move else "",
+            is_connected,
+            _CURRENT_THEME,
+        )
+        if self._last_rendered_sig == current_sig:
+            return
+        self._last_rendered_sig = current_sig
+
+        if not arrow_state["enabled"]:
+            self.status_card.show_deactivated()
+            self.action_btn.setObjectName("MainActionBtnActivate")
+            self.action_btn.setText("ACTIVATE")
+        elif is_showing_move:
+            m = arrow_state["move"].upper()
+            from_sq = m[:2]
+            to_sq = m[2:4]
+            if len(m) >= 5:
+                to_sq += f"={m[4]}"
+            ev = arrow_state.get("eval") or "+0.00"
+            pc = arrow_state.get("piece", "")
+            side_txt = "White" if pc.isupper() else ("Black" if pc.islower() else "Piece")
+            piece_name = PIECE_NAMES_EN.get(pc.lower(), "Best Move")
+            d = arrow_state.get("depth") or str(arrow_state["target_depth"])
+
+            self.status_card.show_live_move(from_sq, to_sq, ev, f"{side_txt} {piece_name}", d)
+            self.action_btn.setObjectName("MainActionBtnDeactivate")
+            self.action_btn.setText("DEACTIVATE")
+        else:
+            self.status_card.show_waiting(is_connected=is_connected)
+            self.action_btn.setObjectName("MainActionBtnDeactivate")
+            self.action_btn.setText("DEACTIVATE")
+
+        self.action_btn.style().unpolish(self.action_btn)
+        self.action_btn.style().polish(self.action_btn)
 
 
 # ================= MODERN LUXURY ALERT MODAL DIALOG =================
@@ -1317,316 +2259,11 @@ class ModernAlertDialog(QDialog):
         """)
         ok_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         ok_btn.clicked.connect(self.accept)
-        c_layout.addWidget(ok_btn, 0, Qt.AlignmentFlag.AlignCenter)
+        c_layout.addWidget(ok_btn)
 
         layout.addWidget(card)
 
 
-# ================= BẢNG ĐIỀU KHIỂN CHÍNH (CONTROL CENTER LUÔN MỞ SẴN CHO NGƯỜI DÙNG) =================
-class ControlCenterWindow(QWidget):
-    def __init__(self, active_key: str, hwid: str):
-        super().__init__()
-        self.active_key = active_key
-        self.hwid = hwid
-        self.setObjectName("Root")
-        self.setWindowTitle("CHESS STEALTH — Control Center")
-        self.setWindowIcon(app_icon())
-        self.setFixedSize(500, 615)
-        self.setStyleSheet(_build_qss(_CURRENT_THEME))
-
-        self.active_color_name = "Orange (Classic)"
-        self.swatches = {}
-        self.side_btns = {}
-
-        ensure_overlay_running(active_key, hwid)
-        install_scripts_and_extension()
-
-        self._build_ui()
-
-        # Timer liên tục cập nhật nước cờ và trạng thái
-        self.status_timer = QTimer(self)
-        self.status_timer.timeout.connect(self._sync_live_status)
-        self.status_timer.start(50)
-
-    @property
-    def color_combo(self):
-        class _Proxy:
-            def __init__(self, p): self.p = p
-            def currentText(self): return self.p.active_color_name
-        return _Proxy(self)
-
-    @property
-    def side_combo(self):
-        class _Proxy:
-            def __init__(self, p): self.p = p
-            def currentData(self): return arrow_state.get("side", "auto")
-        return _Proxy(self)
-
-    def _build_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 18, 20, 18)
-        layout.setSpacing(14)
-
-        # Top Bar
-        top = QHBoxLayout()
-        top.addWidget(build_brand_header())
-        top.addStretch()
-
-        self.theme_btn = QPushButton("Theme")
-        self.theme_btn.setObjectName("SecondaryBtn")
-        self.theme_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.theme_btn.clicked.connect(self._toggle_theme)
-        top.addWidget(self.theme_btn)
-        layout.addLayout(top)
-
-        # 1. NÚT BẬT / TẮT TRỰC TIẾP (TOGGLE BUTTON THAY VÌ PHÍM TẮT)
-        self.toggle_btn = QPushButton("STEALTH ASSIST: ACTIVE (ON)")
-        self.toggle_btn.setObjectName("ToggleBtnActive")
-        self.toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.toggle_btn.clicked.connect(self._toggle_assist)
-        layout.addWidget(self.toggle_btn)
-
-        # 2. KHUNG HIỂN THỊ NƯỚC ĐI TỨC THÌ (ZERO-DOM LIVE FEEDBACK)
-        live_card = QFrame()
-        live_card.setObjectName("Card")
-        live_layout = QVBoxLayout(live_card)
-        live_layout.setContentsMargins(16, 12, 16, 12)
-        live_layout.setSpacing(10)
-
-        live_title = QLabel("LIVE MOVE (ZERO-DOM OVERLAY)")
-        live_title.setObjectName("SectionTitle")
-        live_layout.addWidget(live_title)
-
-        self.move_lbl = QLabel("READY • WAITING FOR CHESS.COM")
-        self.move_lbl.setFont(QFont("Consolas", 14, QFont.Weight.Bold))
-        self.move_lbl.setStyleSheet("color: #22d3ee;")
-        self.move_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        live_layout.addWidget(self.move_lbl)
-
-        # Arrow Color Palette Header
-        palette_header = QHBoxLayout()
-        palette_lbl = QLabel("Arrow Palette:")
-        palette_lbl.setObjectName("SectionTitle")
-        palette_header.addWidget(palette_lbl)
-        palette_header.addStretch()
-
-        self.color_badge = QLabel()
-        palette_header.addWidget(self.color_badge)
-        live_layout.addLayout(palette_header)
-
-        # Visual Color Swatches Row
-        swatches_row = QHBoxLayout()
-        swatches_row.setSpacing(8)
-        swatches_row.setContentsMargins(0, 0, 0, 0)
-
-        for name, qc in COLOR_PRESETS.items():
-            s = ColorSwatch(name, qc, self._on_color_changed)
-            self.swatches[name] = s
-            swatches_row.addWidget(s)
-
-        swatches_row.addStretch()
-        live_layout.addLayout(swatches_row)
-
-        # Settings sub-row: Side & Y-Nudge
-        sub_row = QHBoxLayout()
-        sub_row.setSpacing(14)
-
-        # Side View Segmented Pill Switcher
-        side_col = QVBoxLayout()
-        side_col.setSpacing(4)
-        s_lbl = QLabel("Side:")
-        s_lbl.setObjectName("SectionTitle")
-        side_col.addWidget(s_lbl)
-
-        side_box = QFrame()
-        side_box.setObjectName("SubControlContainer")
-        side_layout = QHBoxLayout(side_box)
-        side_layout.setContentsMargins(3, 3, 3, 3)
-        side_layout.setSpacing(2)
-
-        side_items = [("Auto", "auto"), ("White", "w"), ("Black", "b")]
-        for label, val in side_items:
-            btn = QPushButton(label)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setProperty("class", "SegmentBtn")
-            btn.setFixedHeight(28)
-            btn.clicked.connect(lambda _=False, v=val: self._on_side_changed(v))
-            self.side_btns[val] = btn
-            side_layout.addWidget(btn)
-
-        side_col.addWidget(side_box)
-        sub_row.addLayout(side_col)
-
-        # Y-Nudge Stepper
-        y_col = QVBoxLayout()
-        y_col.setSpacing(4)
-        y_lbl = QLabel("Y-Nudge:")
-        y_lbl.setObjectName("SectionTitle")
-        y_col.addWidget(y_lbl)
-
-        nudge_box = QFrame()
-        nudge_box.setObjectName("SubControlContainer")
-        nudge_layout = QHBoxLayout(nudge_box)
-        nudge_layout.setContentsMargins(3, 3, 3, 3)
-        nudge_layout.setSpacing(2)
-
-        up_btn = QPushButton("▲ -4")
-        up_btn.setProperty("class", "StepperBtn")
-        up_btn.setFixedSize(38, 28)
-        up_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-
-        self.y_val_lbl = QLabel(f"{arrow_state['offset_y']}px")
-        self.y_val_lbl.setObjectName("StepperVal")
-        self.y_val_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        down_btn = QPushButton("▼ +4")
-        down_btn.setProperty("class", "StepperBtn")
-        down_btn.setFixedSize(38, 28)
-        down_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-
-        def nudge(delta: int):
-            arrow_state["offset_y"] += delta
-            self.y_val_lbl.setText(f"{arrow_state['offset_y']}px")
-
-        up_btn.clicked.connect(lambda: nudge(-4))
-        down_btn.clicked.connect(lambda: nudge(4))
-
-        nudge_layout.addWidget(up_btn)
-        nudge_layout.addWidget(self.y_val_lbl)
-        nudge_layout.addWidget(down_btn)
-
-        y_col.addWidget(nudge_box)
-        sub_row.addLayout(y_col)
-
-        live_layout.addLayout(sub_row)
-        layout.addWidget(live_card)
-
-        # 3. DANH SÁCH CÁC TRÌNH DUYỆT (BẤM VÀO MỞ RA VÀ APP VẪN MỞ NGUYÊN ĐÓ)
-        browser_card = QFrame()
-        browser_card.setObjectName("Card")
-        b_layout = QVBoxLayout(browser_card)
-        b_layout.setContentsMargins(14, 12, 14, 12)
-        b_layout.setSpacing(8)
-
-        b_title = QLabel("LAUNCH CHESS.COM (WINDOW STAYS OPEN)")
-        b_title.setObjectName("SectionTitle")
-        b_layout.addWidget(b_title)
-
-        grid = QGridLayout()
-        grid.setSpacing(8)
-
-        browsers = [
-            ("Google Chrome", "chrome", "chrome"),
-            ("Microsoft Edge", "edge", "edge"),
-            ("Brave Browser", "brave", "brave"),
-            ("Cốc Cốc", "coccoc", "coccoc"),
-            ("Opera / GX", "opera", "opera"),
-            ("Mozilla Firefox", "firefox", "firefox"),
-            ("Min Browser", "min", "min"),
-            ("Only Overlay", "other", "pawn"),
-        ]
-
-        for idx, (label_text, val, logo_key) in enumerate(browsers):
-            btn = QPushButton(f"  {label_text}")
-            btn.setProperty("class", "BrowserCard")
-            btn.setIcon(QIcon(pixmap_from_data_uri(LOGOS[logo_key], 22)))
-            btn.setIconSize(QSize(22, 22))
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.clicked.connect(lambda _=False, v=val, l=label_text: self._launch_browser(v, l))
-            grid.addWidget(btn, idx // 2, idx % 2)
-
-        b_layout.addLayout(grid)
-        layout.addWidget(browser_card)
-
-        self._on_color_changed(self.active_color_name)
-        self._on_side_changed(arrow_state.get("side", "auto"))
-
-    def _toggle_theme(self):
-        global _CURRENT_THEME
-        _CURRENT_THEME = "light" if _CURRENT_THEME == "dark" else "dark"
-        self.setStyleSheet(_build_qss(_CURRENT_THEME))
-        self._on_color_changed(self.active_color_name)
-        self._on_side_changed(arrow_state.get("side", "auto"))
-        for s in self.swatches.values():
-            s.update()
-
-    def _toggle_assist(self):
-        arrow_state["enabled"] = not arrow_state["enabled"]
-        if arrow_state["enabled"]:
-            self.toggle_btn.setObjectName("ToggleBtnActive")
-            self.toggle_btn.setText("STEALTH ASSIST: ACTIVE (ON)")
-        else:
-            self.toggle_btn.setObjectName("ToggleBtnPaused")
-            self.toggle_btn.setText("STEALTH ASSIST: PAUSED (OFF)")
-        self.toggle_btn.style().unpolish(self.toggle_btn)
-        self.toggle_btn.style().polish(self.toggle_btn)
-
-    def _on_color_changed(self, name: str):
-        if name not in COLOR_PRESETS:
-            return
-        self.active_color_name = name
-        qc = COLOR_PRESETS[name]
-        arrow_state["qcolor"] = qc
-
-        for n, s in self.swatches.items():
-            s.is_active = (n == name)
-            s.update()
-
-        hex_c = f"#{qc.red():02x}{qc.green():02x}{qc.blue():02x}"
-        self.move_lbl.setStyleSheet(f"color: {hex_c};")
-        self.color_badge.setText(name.upper())
-        self.color_badge.setStyleSheet(f"""
-            color: {hex_c};
-            background-color: rgba({qc.red()}, {qc.green()}, {qc.blue()}, 0.15);
-            border: 1px solid rgba({qc.red()}, {qc.green()}, {qc.blue()}, 0.4);
-            border-radius: 6px;
-            padding: 3px 8px;
-            font-size: 11px;
-            font-weight: 700;
-        """)
-
-    def _on_side_changed(self, val: str = None):
-        if val is None:
-            val = arrow_state.get("side", "auto")
-        arrow_state["side"] = val
-        for v, btn in self.side_btns.items():
-            if v == val:
-                btn.setProperty("class", "SegmentBtnActive")
-            else:
-                btn.setProperty("class", "SegmentBtn")
-            btn.style().unpolish(btn)
-            btn.style().polish(btn)
-
-    def _launch_browser(self, browser_type: str, label_text: str):
-        if browser_type != "other":
-            launch_browser_for_chess(browser_type)
-        self.move_lbl.setText(f"OPENED {label_text.upper()}")
-
-    def _sync_live_status(self):
-        now = time.time()
-        if not arrow_state["enabled"]:
-            self.move_lbl.setText("ASSIST PAUSED")
-            self.move_lbl.setStyleSheet("color: #ef4444;")
-            return
-
-        if arrow_state["show"] and (now - arrow_state["last_seen"] <= 2.0) and arrow_state["move"]:
-            m = arrow_state["move"].upper()
-            d = arrow_state["depth"]
-            move_fmt = f"{m[:2]} → {m[2:4]}"
-            if d:
-                move_fmt += f"  (Depth {d})"
-            if arrow_state.get("auto_aligned"):
-                move_fmt += " • AUTO-SNAP"
-            self.move_lbl.setText(move_fmt)
-            self.move_lbl.setStyleSheet("color: #34d399;")
-        elif now - arrow_state["last_seen"] > 2.0:
-            self.move_lbl.setText("ACTIVE • AUTO-SNAP READY")
-            qc = arrow_state.get("qcolor", COLOR_PRESETS["Orange (Classic)"])
-            hex_c = f"#{qc.red():02x}{qc.green():02x}{qc.blue():02x}"
-            self.move_lbl.setStyleSheet(f"color: {hex_c};")
-
-
-# ================= 3D SPLIT-PANE ACTIVATION WINDOW =================
 class ActivationWindow(QWidget):
     def __init__(self, hwid: str, on_activated_cb=None):
         super().__init__()
@@ -1635,19 +2272,38 @@ class ActivationWindow(QWidget):
         self._activated = False
         self.theme = _CURRENT_THEME
 
-        self.setWindowTitle("Chess Stealth Pro — License Activation")
+        self.setWindowTitle("Chess Stealth — Key Login")
         self.setFixedSize(840, 520)
-        self.setWindowIcon(app_icon())
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self._drag_pos = None
 
         self._theme_shortcut = QShortcut(QKeySequence("Ctrl+T"), self)
         self._theme_shortcut.activated.connect(self._toggle_theme)
 
         self.bg_dark_pix = QPixmap(get_asset_path("activation_bg_dark.png"))
+        if not self.bg_dark_pix.isNull():
+            self.bg_dark_pix.setDevicePixelRatio(self.bg_dark_pix.width() / 840.0)
         self.bg_light_pix = QPixmap(get_asset_path("activation_bg_light.png"))
+        if not self.bg_light_pix.isNull():
+            self.bg_light_pix.setDevicePixelRatio(self.bg_light_pix.width() / 840.0)
 
         self._build_ui()
         self._apply_theme()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.MouseButton.LeftButton and hasattr(self, "_drag_pos") and self._drag_pos is not None:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
 
     def closeEvent(self, event):
         event.accept()
@@ -1658,59 +2314,85 @@ class ActivationWindow(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(0.5, 0.5, self.width() - 1.0, self.height() - 1.0), 16, 16)
+        painter.setClipPath(path)
         pix = self.bg_dark_pix if self.theme == "dark" else self.bg_light_pix
         if not pix.isNull():
             painter.drawPixmap(0, 0, self.width(), self.height(), pix)
         else:
             painter.fillRect(self.rect(), QColor("#08090d" if self.theme == "dark" else "#f5f5f7"))
+        painter.setClipping(False)
+
+        border_pen = QPen(QColor(255, 255, 255, 28) if self.theme == "dark" else QColor(0, 0, 0, 24), 1)
+        painter.setPen(border_pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(QRectF(0.5, 0.5, self.width() - 1.0, self.height() - 1.0), 16, 16)
+
+    def _update_logo(self):
+        icon_name = "queen_light.png" if self.theme == "dark" else "queen_dark.png"
+        icon_path = get_asset_path(icon_name)
+        if hasattr(self, "logo_lbl") and os.path.exists(icon_path):
+            pix = QPixmap(icon_path).scaled(20, 20, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            self.logo_lbl.setPixmap(pix)
+
+    def _toggle_theme(self):
+        self.theme = "light" if self.theme == "dark" else "dark"
+        self._update_logo()
+        self._apply_theme()
+        self.update()
 
     def _build_ui(self):
-        root_layout = QHBoxLayout(self)
-        root_layout.setContentsMargins(36, 28, 32, 28)
-        root_layout.setSpacing(28)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 12, 20, 22)
+        root.setSpacing(6)
 
-        # ----------------- LEFT PANE -----------------
-        left_pane = QVBoxLayout()
-        left_pane.setContentsMargins(0, 0, 0, 0)
-        left_pane.setSpacing(12)
-
-        brand_row = QHBoxLayout()
-        brand_row.setSpacing(8)
+        # 1. Integrated Title Bar
+        titlebar = QHBoxLayout()
+        titlebar.setContentsMargins(4, 0, 0, 0)
+        titlebar.setSpacing(8)
 
         self.logo_lbl = QLabel()
         self._update_logo()
-        brand_row.addWidget(self.logo_lbl)
+        titlebar.addWidget(self.logo_lbl)
 
-        self.brand_title = QLabel("Chess Stealth")
+        self.brand_title = QLabel("Chess Stealth — Key Login")
         self.brand_title.setObjectName("BrandTitle")
-        brand_row.addWidget(self.brand_title)
+        titlebar.addWidget(self.brand_title)
 
-        self.brand_badge = QLabel("PRO")
-        self.brand_badge.setObjectName("ProBadge")
-        brand_row.addWidget(self.brand_badge)
-        brand_row.addStretch()
-        left_pane.addLayout(brand_row)
+        titlebar.addStretch()
 
+        self.min_btn = QPushButton("—")
+        self.min_btn.setObjectName("WindowCtrlBtn")
+        self.min_btn.setFixedSize(28, 26)
+        self.min_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.min_btn.setToolTip("Minimize")
+        self.min_btn.clicked.connect(self.showMinimized)
+        titlebar.addWidget(self.min_btn)
+
+        self.close_btn = QPushButton("✕")
+        self.close_btn.setObjectName("WindowCloseBtn")
+        self.close_btn.setFixedSize(28, 26)
+        self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.close_btn.setToolTip("Close")
+        self.close_btn.clicked.connect(self.close)
+        titlebar.addWidget(self.close_btn)
+
+        root.addLayout(titlebar)
+
+        # 2. Main Body Area
+        body_layout = QHBoxLayout()
+        body_layout.setContentsMargins(12, 8, 8, 0)
+        body_layout.setSpacing(24)
+
+        # Left Pane: Clean so 3D pieces artwork is completely visible
+        left_pane = QVBoxLayout()
+        left_pane.setContentsMargins(0, 0, 0, 0)
         left_pane.addStretch()
+        body_layout.addLayout(left_pane, 1)
 
-        bottom_left_row = QHBoxLayout()
-        bottom_left_row.setSpacing(10)
-        self.theme_btn = QPushButton("Theme: Dark" if self.theme == "dark" else "Theme: Light")
-        self.theme_btn.setObjectName("ThemeSwitchBtn")
-        self.theme_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.theme_btn.clicked.connect(self._toggle_theme)
-        bottom_left_row.addWidget(self.theme_btn)
-
-        self.ver_lbl = QLabel("v2.2 Stealth")
-        self.ver_lbl.setObjectName("VerLabel")
-        bottom_left_row.addWidget(self.ver_lbl)
-
-        bottom_left_row.addStretch()
-        left_pane.addLayout(bottom_left_row)
-
-        root_layout.addLayout(left_pane, 1)
-
-        # ----------------- RIGHT PANE (FROSTED CARD) -----------------
+        # Right Pane: Frosted Card
         self.card = QFrame()
         self.card.setObjectName("FrostedCard")
         self.card.setFixedWidth(400)
@@ -1719,6 +2401,7 @@ class ActivationWindow(QWidget):
         card_layout.setContentsMargins(28, 24, 28, 26)
         card_layout.setSpacing(14)
 
+        # Top link: "Get 24h free key"
         top_link_row = QHBoxLayout()
         top_link_row.addStretch()
         self.get_key_link = QPushButton("Get 24h free key")
@@ -1728,7 +2411,7 @@ class ActivationWindow(QWidget):
         top_link_row.addWidget(self.get_key_link)
         card_layout.addLayout(top_link_row)
 
-        self.title_lbl = QLabel("Activate")
+        self.title_lbl = QLabel("Key Login")
         self.title_lbl.setObjectName("ActivateTitle")
         card_layout.addWidget(self.title_lbl)
 
@@ -1760,7 +2443,10 @@ class ActivationWindow(QWidget):
         self.copy_btn = QPushButton("Copy")
         self.copy_btn.setObjectName("CopyPillBtn")
         self.copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.copy_btn.clicked.connect(self._copy_hwid)
+        def copy_hwid():
+            QApplication.clipboard().setText(self.hwid)
+            self.copy_btn.setText("Copied")
+        self.copy_btn.clicked.connect(copy_hwid)
         hwid_row.addWidget(self.copy_btn)
         hwid_sec.addLayout(hwid_row)
         card_layout.addLayout(hwid_sec)
@@ -1769,16 +2455,14 @@ class ActivationWindow(QWidget):
         self.sub_info_lbl.setObjectName("SubInfoLabel")
         card_layout.addWidget(self.sub_info_lbl)
 
-        buy_row = QHBoxLayout()
+        buy_link_row = QHBoxLayout()
+        buy_link_row.addStretch()
         self.buy_link = QPushButton("Buy lifetime key")
         self.buy_link.setObjectName("TextLink")
         self.buy_link.setCursor(Qt.CursorShape.PointingHandCursor)
         self.buy_link.clicked.connect(lambda: os.startfile(BUY_LIFE_URL))
-        buy_row.addWidget(self.buy_link)
-        buy_row.addStretch()
-        card_layout.addLayout(buy_row)
-
-        card_layout.addStretch()
+        buy_link_row.addWidget(self.buy_link)
+        card_layout.addLayout(buy_link_row)
 
         self.act_btn = QPushButton("ACTIVATE")
         self.act_btn.setObjectName("ActivateBarBtn")
@@ -1786,47 +2470,24 @@ class ActivationWindow(QWidget):
         self.act_btn.clicked.connect(self.handle_activate)
         card_layout.addWidget(self.act_btn)
 
-        root_layout.addWidget(self.card)
-
-    def _update_logo(self):
-        icon_name = "queen_dark.png" if self.theme == "dark" else "queen_light.png"
-        icon_path = get_asset_path(icon_name)
-        if os.path.exists(icon_path):
-            pix = QPixmap(icon_path).scaled(28, 28, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            self.logo_lbl.setPixmap(pix)
-
-    def _copy_hwid(self):
-        QApplication.clipboard().setText(self.hwid)
-        self.copy_btn.setText("Copied!")
-        QTimer.singleShot(2000, lambda: self.copy_btn.setText("Copy"))
-
-    def _toggle_theme(self):
-        global _CURRENT_THEME
-        self.theme = "light" if self.theme == "dark" else "dark"
-        _CURRENT_THEME = self.theme
-        self._apply_theme()
-        self.update()
+        body_layout.addWidget(self.card)
+        root.addLayout(body_layout)
 
     def _apply_theme(self):
-        self._update_logo()
-        self.theme_btn.setText("Theme: Dark" if self.theme == "dark" else "Theme: Light")
         if self.theme == "dark":
             self.setStyleSheet("""
             QWidget { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif; }
-            QLabel#BrandTitle { color: #ffffff; font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
-            QLabel#ProBadge {
-                background-color: #242734; color: #a1a1a6;
-                border-radius: 6px; padding: 2px 6px; font-size: 10px; font-weight: 700;
+            QLabel#BrandTitle { color: #f5f5f7; font-size: 14px; font-weight: 700; }
+            QPushButton#WindowCtrlBtn, QPushButton#WindowCloseBtn {
+                background-color: transparent;
+                color: #a1a1a6;
+                border: none;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: 700;
             }
-            QLabel#VerLabel {
-                color: #55555c; font-size: 11px; font-weight: 500;
-            }
-            QPushButton#ThemeSwitchBtn {
-                background-color: rgba(255, 255, 255, 0.08); color: #a1a1a6;
-                border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 9px;
-                padding: 6px 14px; font-size: 12px; font-weight: 600;
-            }
-            QPushButton#ThemeSwitchBtn:hover { background-color: rgba(255, 255, 255, 0.15); color: #ffffff; }
+            QPushButton#WindowCtrlBtn:hover { background-color: rgba(255, 255, 255, 0.10); color: #ffffff; }
+            QPushButton#WindowCloseBtn:hover { background-color: rgba(255, 255, 255, 0.16); color: #ffffff; }
             
             QFrame#FrostedCard {
                 background-color: rgba(12, 14, 20, 0.78);
@@ -1837,7 +2498,7 @@ class ActivationWindow(QWidget):
                 color: #ffffff; font-size: 38px; font-weight: 800; letter-spacing: -0.03em;
             }
             QLabel#FieldLabel {
-                color: #a1a1a6; font-size: 12px; font-weight: 600;
+                color: #98989f; font-size: 12px; font-weight: 600;
             }
             QLineEdit#KeyInput {
                 background-color: rgba(255, 255, 255, 0.05); color: #ffffff;
@@ -1881,20 +2542,17 @@ class ActivationWindow(QWidget):
         else:
             self.setStyleSheet("""
             QWidget { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif; }
-            QLabel#BrandTitle { color: #1d1d1f; font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
-            QLabel#ProBadge {
-                background-color: #e5e5ea; color: #48484a;
-                border-radius: 6px; padding: 2px 6px; font-size: 10px; font-weight: 700;
+            QLabel#BrandTitle { color: #1d1d1f; font-size: 14px; font-weight: 700; }
+            QPushButton#WindowCtrlBtn, QPushButton#WindowCloseBtn {
+                background-color: transparent;
+                color: #71717A;
+                border: none;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: 700;
             }
-            QLabel#VerLabel {
-                color: #a1a1a6; font-size: 11px; font-weight: 500;
-            }
-            QPushButton#ThemeSwitchBtn {
-                background-color: rgba(0, 0, 0, 0.05); color: #1d1d1f;
-                border: 1px solid rgba(0, 0, 0, 0.12); border-radius: 9px;
-                padding: 6px 14px; font-size: 12px; font-weight: 600;
-            }
-            QPushButton#ThemeSwitchBtn:hover { background-color: rgba(0, 0, 0, 0.08); color: #000000; }
+            QPushButton#WindowCtrlBtn:hover { background-color: rgba(0, 0, 0, 0.06); color: #090B10; }
+            QPushButton#WindowCloseBtn:hover { background-color: rgba(0, 0, 0, 0.10); color: #090B10; }
             
             QFrame#FrostedCard {
                 background-color: rgba(255, 255, 255, 0.88);

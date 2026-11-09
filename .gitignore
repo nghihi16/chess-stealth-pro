@@ -11,3 +11,5 @@ node_modules/
 .wrangler/
 package-lock.json
 THONG_TIN_QUAN_TRI.txt
+screenshots/
+scratch/
