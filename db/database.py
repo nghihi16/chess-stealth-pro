@@ -305,22 +305,27 @@ WEB24H_HMAC_SECRET = b"CHESS_STEALTH_PRO_WEB24H_SECRET_2026"
 
 def ensure_web24h_key_in_db(conn, clean_key: str) -> Optional[dict]:
     """
-    Kiểm tra nếu `clean_key` là mã 24h được sinh từ trang Web vượt link (`FREE24H-<ID6>-<EXPHEX8>-<SIG6>`):
-    - Xác thực chữ ký HMAC-SHA256 và hạn dùng 24h.
-    - Nếu hợp lệ và chưa có trên Supabase `licenses`, tự động lưu vào `licenses` với đúng thời hạn `expires_at`.
+    Xác thực chữ ký HMAC-SHA256 của các License Key được sinh từ Web Admin / Web Get Key:
+    Hỗ trợ FREE24H, PRO07D, PRO30D, LIFEVIP.
+    Nếu hợp lệ, tự động lưu vào bảng licenses của SQLite để kích hoạt tức thì không cần mạng.
     """
     parts = clean_key.strip().upper().split("-")
-    if len(parts) != 4 or parts[0] != "FREE24H":
+    if len(parts) != 4:
         return None
 
-    _, token_id, exp_hex, key_sig = parts
+    prefix, token_id, exp_hex, key_sig = parts
+    if prefix not in ("FREE24H", "PRO07D", "PRO30D", "LIFEVIP"):
+        return None
     if len(token_id) != 6 or len(exp_hex) != 8 or len(key_sig) != 6:
         return None
 
-    try:
-        exp_ts = int(exp_hex, 16)
-    except ValueError:
-        return None
+    is_lifetime = (prefix == "LIFEVIP" or exp_hex == "FFFFFFFF")
+    exp_ts = None
+    if not is_lifetime:
+        try:
+            exp_ts = int(exp_hex, 16)
+        except ValueError:
+            return None
 
     expected_sig = (
         hmac.new(
@@ -335,8 +340,15 @@ def ensure_web24h_key_in_db(conn, clean_key: str) -> Optional[dict]:
         return None
 
     now = int(time.time())
-    if exp_ts <= now or exp_ts > now + 86400 + 600:
+    if not is_lifetime and exp_ts is not None and exp_ts <= now:
         return None
+
+    if prefix == "FREE24H":
+        ltype = "trial_24h"
+    elif prefix == "LIFEVIP":
+        ltype = "lifetime"
+    else:
+        ltype = "monthly"
 
     existing = conn.execute("SELECT * FROM licenses WHERE key = ?", (clean_key,)).fetchone()
     if existing:
@@ -345,9 +357,9 @@ def ensure_web24h_key_in_db(conn, clean_key: str) -> Optional[dict]:
     cursor = conn.execute(
         """
         INSERT INTO licenses (key, type, status, hwid, hwid_reset_count, created_at, activated_at, expires_at)
-        VALUES (?, 'trial_24h', 'active', NULL, 0, ?, NULL, ?)
+        VALUES (?, ?, 'active', NULL, 0, ?, NULL, ?)
         """,
-        (clean_key, now, exp_ts),
+        (clean_key, ltype, now, exp_ts),
     )
     conn.commit()
     row = conn.execute("SELECT * FROM licenses WHERE id = ?", (cursor.lastrowid,)).fetchone()

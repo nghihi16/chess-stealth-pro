@@ -192,8 +192,9 @@ def activate_or_verify_key(
     hwid_val = hwid or get_hwid()
     clean_key = key_str.strip().upper()
 
-    # Khóa 24h miễn phí (FREE24H-): Xác thực toán học HMAC cục bộ ngay lập tức (0.001s, không đợi network)
-    if clean_key.startswith("FREE24H-"):
+    # Khóa sinh từ Web (FREE24H-, PRO07D-, PRO30D-, LIFEVIP-): Xác thực HMAC cục bộ 0.001s
+    crypto_prefixes = ("FREE24H-", "PRO07D-", "PRO30D-", "LIFEVIP-")
+    if any(clean_key.startswith(p) for p in crypto_prefixes):
         nonce = secrets.token_hex(16)
         resp_data = _direct_local_verify_or_activate(clean_key, hwid_val, nonce)
         if resp_data.get("valid") is True and resp_data.get("hwid") == hwid_val:
@@ -202,7 +203,7 @@ def activate_or_verify_key(
             _ACTIVE_SESSION_SIGNATURE = sig
             _save_offline_cache(resp_data, sig)
             return True, str(resp_data.get("message", "Activated"))
-        return False, str(resp_data.get("message", "Invalid license key."))
+        return False, "Invalid Key"
 
     for endpoint in ("/verify", "/activate"):
         nonce = secrets.token_hex(16)
@@ -245,10 +246,10 @@ def activate_or_verify_key(
 
         sig = resp_data.get("signature", "")
         if not verify_response_signature(resp_data, sig, ED25519_PUBLIC_KEY_HEX):
-            return False, "Signature mismatch."
+            return False, "Invalid Key"
 
         if resp_data.get("nonce") != nonce:
-            return False, "Invalid response nonce."
+            return False, "Invalid Key"
 
         if resp_data.get("valid") is True and resp_data.get("hwid") == hwid_val:
             _ACTIVE_SESSION_PAYLOAD = resp_data
@@ -258,9 +259,9 @@ def activate_or_verify_key(
         else:
             if endpoint == "/verify" and "not activated" in str(resp_data.get("message", "")).lower():
                 continue
-            return False, str(resp_data.get("message", "Invalid license key."))
+            return False, "Invalid Key"
 
-    return False, "Verification failed."
+    return False, "Invalid Key"
 
 
 def derive_arrow_scale_factor() -> float:

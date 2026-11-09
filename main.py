@@ -16,6 +16,7 @@ from PySide6.QtGui import QBrush, QColor, QFont, QIcon, QPainter, QPen, QPixmap,
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -1201,6 +1202,103 @@ class ColorSwatch(QPushButton):
             painter.drawLine(cx - 1.5, cy + 3.0, cx + 5.0, cy - 3.5)
 
 
+# ================= MODERN LUXURY ALERT MODAL DIALOG =================
+class AlertIconWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(52, 52)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Outer soft glow circle
+        painter.setPen(QPen(QColor(239, 68, 68, 80), 1.5))
+        painter.setBrush(QBrush(QColor(239, 68, 68, 30)))
+        painter.drawEllipse(2, 2, 48, 48)
+
+        # Inner red circle
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(QColor(239, 68, 68, 220)))
+        painter.drawEllipse(8, 8, 36, 36)
+
+        # Vector exclamation mark
+        pen = QPen(QColor(255, 255, 255), 2.8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.drawLine(26, 17, 26, 27)
+        painter.drawPoint(26, 34)
+
+
+class ModernAlertDialog(QDialog):
+    def __init__(self, title: str = "Invalid Key", message: str = "Invalid Key", is_dark: bool = True, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFixedSize(360, 240)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+
+        card = QFrame()
+        bg = "#0d121e" if is_dark else "#ffffff"
+        border = "#1e293b" if is_dark else "#cbd5e1"
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {bg};
+                border: 1px solid {border};
+                border-radius: 16px;
+            }}
+        """)
+
+        c_layout = QVBoxLayout(card)
+        c_layout.setContentsMargins(20, 20, 20, 18)
+        c_layout.setSpacing(10)
+        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        icon = AlertIconWidget()
+        c_layout.addWidget(icon, 0, Qt.AlignmentFlag.AlignCenter)
+
+        t_lbl = QLabel(title)
+        t_lbl.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
+        t_lbl.setStyleSheet(f"color: {'#f8fafc' if is_dark else '#0f172a'}; border: none;")
+        t_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        c_layout.addWidget(t_lbl)
+
+        m_lbl = QLabel(message)
+        m_lbl.setFont(QFont("Segoe UI", 12))
+        m_lbl.setStyleSheet(f"color: {'#94a3b8' if is_dark else '#64748b'}; border: none;")
+        m_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        m_lbl.setWordWrap(True)
+        c_layout.addWidget(m_lbl)
+
+        ok_btn = QPushButton("Dismiss")
+        btn_bg = "#161e2e" if is_dark else "#f1f5f9"
+        btn_color = "#f8fafc" if is_dark else "#0f172a"
+        btn_border = "#283548" if is_dark else "#cbd5e1"
+        ok_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {btn_bg};
+                color: {btn_color};
+                border: 1px solid {btn_border};
+                border-radius: 10px;
+                min-height: 38px;
+                font-size: 13px;
+                font-weight: 700;
+                padding: 0 24px;
+            }}
+            QPushButton:hover {{
+                border: 1px solid #ef4444;
+                color: #ef4444;
+                background-color: rgba(239, 68, 68, 0.1);
+            }}
+        """)
+        ok_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        ok_btn.clicked.connect(self.accept)
+        c_layout.addWidget(ok_btn, 0, Qt.AlignmentFlag.AlignCenter)
+
+        layout.addWidget(card)
+
+
 # ================= BẢNG ĐIỀU KHIỂN CHÍNH (CONTROL CENTER LUÔN MỞ SẴN CHO NGƯỜI DÙNG) =================
 class ControlCenterWindow(QWidget):
     def __init__(self, active_key: str, hwid: str):
@@ -1620,7 +1718,8 @@ def main():
     def handle_activate():
         k = key_input.text().strip()
         if not k:
-            QMessageBox.warning(win, "Missing Key", "Please enter your License Key.")
+            dlg = ModernAlertDialog("Missing Key", "Please enter your License Key.", is_dark=(_CURRENT_THEME == "dark"), parent=win)
+            dlg.exec()
             return
         valid, msg = activate_or_verify_key(API_BASE_URL, k, hwid)
         if valid:
@@ -1632,7 +1731,8 @@ def main():
             win.close()
             open_control_center(k)
         else:
-            QMessageBox.critical(win, "Error", msg)
+            dlg = ModernAlertDialog("Invalid Key", "Invalid Key", is_dark=(_CURRENT_THEME == "dark"), parent=win)
+            dlg.exec()
 
     act_btn.clicked.connect(handle_activate)
     key_input.returnPressed.connect(handle_activate)
