@@ -12,7 +12,7 @@ import time
 import urllib.parse
 
 from PySide6.QtCore import QByteArray, QPointF, QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap, QPolygonF
+from PySide6.QtGui import QBrush, QColor, QFont, QIcon, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -60,6 +60,7 @@ COLOR_PRESETS = {
     "Emerald (Green)": QColor(16, 185, 129, 230),
     "Crimson (Red)": QColor(239, 68, 68, 230),
     "Gold (Yellow)": QColor(234, 179, 8, 230),
+    "Violet (Neon)": QColor(168, 85, 247, 230),
 }
 
 arrow_state = {
@@ -956,10 +957,67 @@ def _build_qss(theme: str) -> str:
             text-align: left; padding: 6px 12px;
         }
         QPushButton.BrowserCard:hover { border: 1px solid #0284c7; background-color: #eef2f6; }
+        QFrame#SubControlContainer {
+            background-color: #f8fafc;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+        }
+        QPushButton.SegmentBtn {
+            background-color: transparent;
+            color: #64748b;
+            font-size: 11px;
+            font-weight: 600;
+            border: none;
+            border-radius: 6px;
+            padding: 5px 10px;
+            min-height: 22px;
+        }
+        QPushButton.SegmentBtn:hover {
+            background-color: #e2e8f0;
+            color: #0f172a;
+        }
+        QPushButton.SegmentBtnActive {
+            background-color: #0284c7;
+            color: #ffffff;
+            font-size: 11px;
+            font-weight: 800;
+            border: none;
+            border-radius: 6px;
+            padding: 5px 10px;
+            min-height: 22px;
+        }
+        QPushButton.StepperBtn {
+            background-color: #e2e8f0;
+            color: #0f172a;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 700;
+            min-height: 24px;
+            padding: 0 4px;
+        }
+        QPushButton.StepperBtn:hover {
+            background-color: #cbd5e1;
+            border: 1px solid #0284c7;
+        }
+        QLabel#StepperVal {
+            color: #0f172a;
+            font-family: 'Consolas';
+            font-size: 12px;
+            font-weight: 800;
+            min-width: 44px;
+        }
         QComboBox {
             background-color: #f8fafc; color: #0f172a;
             border: 1px solid #cbd5e1; border-radius: 8px;
-            padding: 6px 10px; font-size: 12px; font-weight: 600;
+            padding: 6px 12px; font-size: 12px; font-weight: 600;
+        }
+        QComboBox:hover { border: 1px solid #0284c7; }
+        QComboBox::drop-down { border: none; width: 20px; }
+        QComboBox QAbstractItemView {
+            background-color: #ffffff; color: #0f172a;
+            border: 1px solid #cbd5e1; selection-background-color: #e2e8f0;
+            selection-color: #0284c7;
         }
         """
     return """
@@ -967,7 +1025,7 @@ def _build_qss(theme: str) -> str:
     QFrame#Card { background-color: #0d121e; border: 1px solid #1e293b; border-radius: 16px; }
     QLabel#BrandChess { color: #f8fafc; font-size: 16px; font-weight: 800; }
     QLabel#BrandStealth { color: #22d3ee; font-size: 10px; font-weight: 800; }
-    QLabel#SectionTitle { color: #94a3b8; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+    QLabel#SectionTitle { color: #94a3b8; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
     QLineEdit {
         background-color: #161e2e; color: #f8fafc;
         border: 1px solid #283548; border-radius: 10px;
@@ -1005,12 +1063,142 @@ def _build_qss(theme: str) -> str:
         text-align: left; padding: 6px 12px;
     }
     QPushButton.BrowserCard:hover { border: 1px solid #22d3ee; background-color: #1e293b; }
+    QFrame#SubControlContainer {
+        background-color: #161e2e;
+        border: 1px solid #283548;
+        border-radius: 8px;
+    }
+    QPushButton.SegmentBtn {
+        background-color: transparent;
+        color: #94a3b8;
+        font-size: 11px;
+        font-weight: 600;
+        border: none;
+        border-radius: 6px;
+        padding: 5px 10px;
+        min-height: 22px;
+    }
+    QPushButton.SegmentBtn:hover {
+        background-color: #1e293b;
+        color: #f8fafc;
+    }
+    QPushButton.SegmentBtnActive {
+        background-color: #22d3ee;
+        color: #060911;
+        font-size: 11px;
+        font-weight: 800;
+        border: none;
+        border-radius: 6px;
+        padding: 5px 10px;
+        min-height: 22px;
+    }
+    QPushButton.StepperBtn {
+        background-color: #1e293b;
+        color: #f8fafc;
+        border: 1px solid #334155;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 700;
+        min-height: 24px;
+        padding: 0 4px;
+    }
+    QPushButton.StepperBtn:hover {
+        background-color: #283548;
+        border: 1px solid #22d3ee;
+    }
+    QLabel#StepperVal {
+        color: #f8fafc;
+        font-family: 'Consolas';
+        font-size: 12px;
+        font-weight: 800;
+        min-width: 44px;
+    }
     QComboBox {
         background-color: #161e2e; color: #f8fafc;
         border: 1px solid #283548; border-radius: 8px;
-        padding: 6px 10px; font-size: 12px; font-weight: 600;
+        padding: 6px 12px; font-size: 12px; font-weight: 600;
+    }
+    QComboBox:hover { border: 1px solid #22d3ee; }
+    QComboBox::drop-down { border: none; width: 20px; }
+    QComboBox QAbstractItemView {
+        background-color: #0d121e; color: #f8fafc;
+        border: 1px solid #1e293b; selection-background-color: #1e293b;
+        selection-color: #22d3ee;
     }
     """
+
+
+# ================= COLOR SWATCH PALETTE COMPONENT =================
+class ColorSwatch(QPushButton):
+    def __init__(self, name: str, qcolor: QColor, on_select, parent=None):
+        super().__init__(parent)
+        self.name = name
+        self.qcolor = qcolor
+        self.on_select = on_select
+        self.is_active = False
+        self.is_hovered = False
+
+        self.setFixedSize(38, 38)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip(name)
+        self.setAccessibleName(name)
+        self.clicked.connect(lambda: self.on_select(self.name))
+
+    def enterEvent(self, event):
+        self.is_hovered = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.is_hovered = False
+        self.update()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        rect = self.rect()
+        cx = rect.center().x()
+        cy = rect.center().y()
+        r = 13.0
+
+        is_dark = (_CURRENT_THEME == "dark")
+
+        if self.is_active:
+            # Soft glowing halo
+            halo_pen = QPen(QColor(self.qcolor.red(), self.qcolor.green(), self.qcolor.blue(), 100), 5.0)
+            painter.setPen(halo_pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(cx - 16, cy - 16, 32, 32)
+
+            # Sharp outer contrast ring
+            ring_color = QColor(255, 255, 255, 240) if is_dark else QColor(15, 23, 42, 220)
+            ring_pen = QPen(ring_color, 2.2)
+            painter.setPen(ring_pen)
+            painter.drawEllipse(cx - 16, cy - 16, 32, 32)
+        elif self.is_hovered:
+            hover_color = QColor(255, 255, 255, 140) if is_dark else QColor(0, 0, 0, 90)
+            hover_pen = QPen(hover_color, 1.8)
+            painter.setPen(hover_pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(cx - 15, cy - 15, 30, 30)
+            r = 13.5
+
+        # Inner color fill
+        painter.setPen(QPen(QColor(0, 0, 0, 35), 1.0))
+        painter.setBrush(QBrush(self.qcolor))
+        painter.drawEllipse(cx - r, cy - r, r * 2, r * 2)
+
+        # High-contrast vector checkmark for selected state
+        if self.is_active:
+            lum = 0.299 * self.qcolor.red() + 0.587 * self.qcolor.green() + 0.114 * self.qcolor.blue()
+            check_color = QColor(15, 23, 42) if lum > 165 else QColor(255, 255, 255)
+
+            pen = QPen(check_color, 2.4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(pen)
+            painter.drawLine(cx - 4.5, cy - 0.5, cx - 1.5, cy + 3.0)
+            painter.drawLine(cx - 1.5, cy + 3.0, cx + 5.0, cy - 3.5)
 
 
 # ================= BẢNG ĐIỀU KHIỂN CHÍNH (CONTROL CENTER LUÔN MỞ SẴN CHO NGƯỜI DÙNG) =================
@@ -1022,8 +1210,12 @@ class ControlCenterWindow(QWidget):
         self.setObjectName("Root")
         self.setWindowTitle("CHESS STEALTH — Control Center")
         self.setWindowIcon(app_icon())
-        self.setFixedSize(500, 520)
+        self.setFixedSize(500, 615)
         self.setStyleSheet(_build_qss(_CURRENT_THEME))
+
+        self.active_color_name = "Orange (Classic)"
+        self.swatches = {}
+        self.side_btns = {}
 
         ensure_overlay_running(active_key, hwid)
         install_scripts_and_extension()
@@ -1034,6 +1226,20 @@ class ControlCenterWindow(QWidget):
         self.status_timer = QTimer(self)
         self.status_timer.timeout.connect(self._sync_live_status)
         self.status_timer.start(50)
+
+    @property
+    def color_combo(self):
+        class _Proxy:
+            def __init__(self, p): self.p = p
+            def currentText(self): return self.p.active_color_name
+        return _Proxy(self)
+
+    @property
+    def side_combo(self):
+        class _Proxy:
+            def __init__(self, p): self.p = p
+            def currentData(self): return arrow_state.get("side", "auto")
+        return _Proxy(self)
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -1064,7 +1270,7 @@ class ControlCenterWindow(QWidget):
         live_card.setObjectName("Card")
         live_layout = QVBoxLayout(live_card)
         live_layout.setContentsMargins(16, 12, 16, 12)
-        live_layout.setSpacing(6)
+        live_layout.setSpacing(10)
 
         live_title = QLabel("LIVE MOVE (ZERO-DOM OVERLAY)")
         live_title.setObjectName("SectionTitle")
@@ -1076,59 +1282,85 @@ class ControlCenterWindow(QWidget):
         self.move_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         live_layout.addWidget(self.move_lbl)
 
-        # Settings sub-row: Color & Side
+        # Arrow Color Palette Header
+        palette_header = QHBoxLayout()
+        palette_lbl = QLabel("Arrow Palette:")
+        palette_lbl.setObjectName("SectionTitle")
+        palette_header.addWidget(palette_lbl)
+        palette_header.addStretch()
+
+        self.color_badge = QLabel()
+        palette_header.addWidget(self.color_badge)
+        live_layout.addLayout(palette_header)
+
+        # Visual Color Swatches Row
+        swatches_row = QHBoxLayout()
+        swatches_row.setSpacing(8)
+        swatches_row.setContentsMargins(0, 0, 0, 0)
+
+        for name, qc in COLOR_PRESETS.items():
+            s = ColorSwatch(name, qc, self._on_color_changed)
+            self.swatches[name] = s
+            swatches_row.addWidget(s)
+
+        swatches_row.addStretch()
+        live_layout.addLayout(swatches_row)
+
+        # Settings sub-row: Side & Y-Nudge
         sub_row = QHBoxLayout()
-        sub_row.setSpacing(12)
+        sub_row.setSpacing(14)
 
-        color_col = QVBoxLayout()
-        color_col.setSpacing(4)
-        c_lbl = QLabel("Arrow Color:")
-        c_lbl.setObjectName("SectionTitle")
-        color_col.addWidget(c_lbl)
-
-        self.color_combo = QComboBox()
-        for name in COLOR_PRESETS:
-            self.color_combo.addItem(name)
-        self.color_combo.currentTextChanged.connect(self._on_color_changed)
-        color_col.addWidget(self.color_combo)
-        sub_row.addLayout(color_col)
-
+        # Side View Segmented Pill Switcher
         side_col = QVBoxLayout()
         side_col.setSpacing(4)
         s_lbl = QLabel("Side:")
         s_lbl.setObjectName("SectionTitle")
         side_col.addWidget(s_lbl)
 
-        self.side_combo = QComboBox()
-        self.side_combo.addItem("Auto (Board View)", "auto")
-        self.side_combo.addItem("White", "w")
-        self.side_combo.addItem("Black", "b")
-        self.side_combo.currentIndexChanged.connect(self._on_side_changed)
-        side_col.addWidget(self.side_combo)
+        side_box = QFrame()
+        side_box.setObjectName("SubControlContainer")
+        side_layout = QHBoxLayout(side_box)
+        side_layout.setContentsMargins(3, 3, 3, 3)
+        side_layout.setSpacing(2)
+
+        side_items = [("Auto", "auto"), ("White", "w"), ("Black", "b")]
+        for label, val in side_items:
+            btn = QPushButton(label)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setProperty("class", "SegmentBtn")
+            btn.setFixedHeight(28)
+            btn.clicked.connect(lambda _=False, v=val: self._on_side_changed(v))
+            self.side_btns[val] = btn
+            side_layout.addWidget(btn)
+
+        side_col.addWidget(side_box)
         sub_row.addLayout(side_col)
 
-        # Nudge Vertical Offset (Hiệu chỉnh cao độ mũi tên)
+        # Y-Nudge Stepper
         y_col = QVBoxLayout()
         y_col.setSpacing(4)
         y_lbl = QLabel("Y-Nudge:")
         y_lbl.setObjectName("SectionTitle")
         y_col.addWidget(y_lbl)
 
-        y_btn_row = QHBoxLayout()
-        y_btn_row.setSpacing(4)
+        nudge_box = QFrame()
+        nudge_box.setObjectName("SubControlContainer")
+        nudge_layout = QHBoxLayout(nudge_box)
+        nudge_layout.setContentsMargins(3, 3, 3, 3)
+        nudge_layout.setSpacing(2)
 
         up_btn = QPushButton("▲ -4")
-        up_btn.setObjectName("SecondaryBtn")
-        up_btn.setFixedWidth(44)
+        up_btn.setProperty("class", "StepperBtn")
+        up_btn.setFixedSize(38, 28)
         up_btn.setCursor(Qt.CursorShape.PointingHandCursor)
 
         self.y_val_lbl = QLabel(f"{arrow_state['offset_y']}px")
+        self.y_val_lbl.setObjectName("StepperVal")
         self.y_val_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.y_val_lbl.setStyleSheet("font-weight: bold; min-width: 42px; font-family: 'Consolas';")
 
         down_btn = QPushButton("▼ +4")
-        down_btn.setObjectName("SecondaryBtn")
-        down_btn.setFixedWidth(44)
+        down_btn.setProperty("class", "StepperBtn")
+        down_btn.setFixedSize(38, 28)
         down_btn.setCursor(Qt.CursorShape.PointingHandCursor)
 
         def nudge(delta: int):
@@ -1138,10 +1370,11 @@ class ControlCenterWindow(QWidget):
         up_btn.clicked.connect(lambda: nudge(-4))
         down_btn.clicked.connect(lambda: nudge(4))
 
-        y_btn_row.addWidget(up_btn)
-        y_btn_row.addWidget(self.y_val_lbl)
-        y_btn_row.addWidget(down_btn)
-        y_col.addLayout(y_btn_row)
+        nudge_layout.addWidget(up_btn)
+        nudge_layout.addWidget(self.y_val_lbl)
+        nudge_layout.addWidget(down_btn)
+
+        y_col.addWidget(nudge_box)
         sub_row.addLayout(y_col)
 
         live_layout.addLayout(sub_row)
@@ -1184,10 +1417,17 @@ class ControlCenterWindow(QWidget):
         b_layout.addLayout(grid)
         layout.addWidget(browser_card)
 
+        self._on_color_changed(self.active_color_name)
+        self._on_side_changed(arrow_state.get("side", "auto"))
+
     def _toggle_theme(self):
         global _CURRENT_THEME
         _CURRENT_THEME = "light" if _CURRENT_THEME == "dark" else "dark"
         self.setStyleSheet(_build_qss(_CURRENT_THEME))
+        self._on_color_changed(self.active_color_name)
+        self._on_side_changed(arrow_state.get("side", "auto"))
+        for s in self.swatches.values():
+            s.update()
 
     def _toggle_assist(self):
         arrow_state["enabled"] = not arrow_state["enabled"]
@@ -1201,11 +1441,40 @@ class ControlCenterWindow(QWidget):
         self.toggle_btn.style().polish(self.toggle_btn)
 
     def _on_color_changed(self, name: str):
-        if name in COLOR_PRESETS:
-            arrow_state["qcolor"] = COLOR_PRESETS[name]
+        if name not in COLOR_PRESETS:
+            return
+        self.active_color_name = name
+        qc = COLOR_PRESETS[name]
+        arrow_state["qcolor"] = qc
 
-    def _on_side_changed(self):
-        arrow_state["side"] = self.side_combo.currentData()
+        for n, s in self.swatches.items():
+            s.is_active = (n == name)
+            s.update()
+
+        hex_c = f"#{qc.red():02x}{qc.green():02x}{qc.blue():02x}"
+        self.move_lbl.setStyleSheet(f"color: {hex_c};")
+        self.color_badge.setText(name.upper())
+        self.color_badge.setStyleSheet(f"""
+            color: {hex_c};
+            background-color: rgba({qc.red()}, {qc.green()}, {qc.blue()}, 0.15);
+            border: 1px solid rgba({qc.red()}, {qc.green()}, {qc.blue()}, 0.4);
+            border-radius: 6px;
+            padding: 3px 8px;
+            font-size: 11px;
+            font-weight: 700;
+        """)
+
+    def _on_side_changed(self, val: str = None):
+        if val is None:
+            val = arrow_state.get("side", "auto")
+        arrow_state["side"] = val
+        for v, btn in self.side_btns.items():
+            if v == val:
+                btn.setProperty("class", "SegmentBtnActive")
+            else:
+                btn.setProperty("class", "SegmentBtn")
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
 
     def _launch_browser(self, browser_type: str, label_text: str):
         if browser_type != "other":
@@ -1231,7 +1500,9 @@ class ControlCenterWindow(QWidget):
             self.move_lbl.setStyleSheet("color: #34d399;")
         elif now - arrow_state["last_seen"] > 2.0:
             self.move_lbl.setText("ACTIVE • AUTO-SNAP READY")
-            self.move_lbl.setStyleSheet("color: #22d3ee;")
+            qc = arrow_state.get("qcolor", COLOR_PRESETS["Orange (Classic)"])
+            hex_c = f"#{qc.red():02x}{qc.green():02x}{qc.blue():02x}"
+            self.move_lbl.setStyleSheet(f"color: {hex_c};")
 
 
 def main():
