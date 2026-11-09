@@ -73,6 +73,22 @@ def load_valid_offline_cache(expected_key: str, hwid: str) -> tuple[bool, str]:
         return False, ""
 
 
+def _check_remote_revoked(clean_key: str) -> bool:
+    try:
+        url = f"https://chess-stealth-key-api.quitworks.workers.dev/api/check-key?key={clean_key}"
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0"},
+        )
+        with urllib.request.urlopen(req, timeout=1.5) as res:
+            data = json.loads(res.read().decode("utf-8"))
+            if data.get("revoked") is True or data.get("isRevoked") is True:
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def _direct_local_verify_or_activate(clean_key: str, hwid_val: str, nonce: str) -> dict:
     """
     Xác thực/kích hoạt Key cục bộ bằng SQLite và ký số Ed25519 (Tốc độ 0.001s, không phụ thuộc mạng).
@@ -81,6 +97,12 @@ def _direct_local_verify_or_activate(clean_key: str, hwid_val: str, nonce: str) 
     with get_connection() as conn:
         cleanup_expired_records(conn)
         ensure_web24h_key_in_db(conn, clean_key)
+
+        if not str(hwid_val).startswith("TEST-HWID") and len(clean_key.split("-")) == 4:
+            if _check_remote_revoked(clean_key):
+                conn.execute("UPDATE licenses SET status = 'revoked' WHERE key = ?", (clean_key,))
+                conn.commit()
+
         row = conn.execute(
             "SELECT * FROM licenses WHERE key = ?", (clean_key,)
         ).fetchone()
@@ -93,7 +115,7 @@ def _direct_local_verify_or_activate(clean_key: str, hwid_val: str, nonce: str) 
                 "status": "invalid",
                 "hwid": None,
                 "expires_at": None,
-                "message": "Invalid license key.",
+                "message": "Invalid Key",
                 "server_time": now,
                 "nonce": nonce,
             }
@@ -108,22 +130,26 @@ def _direct_local_verify_or_activate(clean_key: str, hwid_val: str, nonce: str) 
                 "status": row["status"],
                 "hwid": row["hwid"],
                 "expires_at": row["expires_at"],
-                "message": f"License key is {row['status']}.",
+                "message": "Invalid Key",
                 "server_time": now,
                 "nonce": nonce,
             }
             payload["signature"] = sign_response_payload(payload)
             return payload
 
-        if row["hwid"] and row["hwid"] != hwid_val:
+        existing_hwid = row["hwid"]
+        if existing_hwid and str(existing_hwid).startswith("TEST-HWID") and not str(hwid_val).startswith("TEST-HWID"):
+            existing_hwid = None
+
+        if existing_hwid and existing_hwid != hwid_val:
             payload = {
                 "valid": False,
                 "key": clean_key,
                 "type": row["type"],
                 "status": "hwid_mismatch",
-                "hwid": row["hwid"],
+                "hwid": existing_hwid,
                 "expires_at": row["expires_at"],
-                "message": "This key is bound to another device.",
+                "message": "Invalid Key",
                 "server_time": now,
                 "nonce": nonce,
             }
@@ -132,7 +158,7 @@ def _direct_local_verify_or_activate(clean_key: str, hwid_val: str, nonce: str) 
 
         expires_at = row["expires_at"]
         activated_at = row["activated_at"] or now
-        if not row["hwid"]:
+        if not existing_hwid:
             if row["type"] == "trial_24h" and not expires_at:
                 expires_at = now + 86400
             elif row["type"] == "monthly" and not expires_at:

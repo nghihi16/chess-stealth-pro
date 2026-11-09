@@ -1259,17 +1259,18 @@ class ModernAlertDialog(QDialog):
         c_layout.addWidget(icon, 0, Qt.AlignmentFlag.AlignCenter)
 
         t_lbl = QLabel(title)
-        t_lbl.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
+        t_lbl.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
         t_lbl.setStyleSheet(f"color: {'#f8fafc' if is_dark else '#0f172a'}; border: none;")
         t_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         c_layout.addWidget(t_lbl)
 
-        m_lbl = QLabel(message)
-        m_lbl.setFont(QFont("Segoe UI", 12))
-        m_lbl.setStyleSheet(f"color: {'#94a3b8' if is_dark else '#64748b'}; border: none;")
-        m_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        m_lbl.setWordWrap(True)
-        c_layout.addWidget(m_lbl)
+        if message and message.strip() != title.strip():
+            m_lbl = QLabel(message)
+            m_lbl.setFont(QFont("Segoe UI", 12))
+            m_lbl.setStyleSheet(f"color: {'#94a3b8' if is_dark else '#64748b'}; border: none;")
+            m_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            m_lbl.setWordWrap(True)
+            c_layout.addWidget(m_lbl)
 
         ok_btn = QPushButton("Dismiss")
         btn_bg = "#161e2e" if is_dark else "#f1f5f9"

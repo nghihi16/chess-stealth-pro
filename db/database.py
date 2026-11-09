@@ -217,6 +217,7 @@ def get_connection():
     conn = sqlite3.connect(db_file, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
+    conn.executescript(EMBEDDED_SCHEMA_SQL)
     return conn
 
 
@@ -263,11 +264,25 @@ def generate_formatted_key(license_type: str) -> str:
         "monthly": "PRO30D",
         "lifetime": "LIFEVIP",
     }
-    prefix = prefix_map.get(license_type, "KEY")
-    p1 = secrets.token_hex(2).upper()
-    p2 = secrets.token_hex(2).upper()
-    p3 = secrets.token_hex(2).upper()
-    return f"{prefix}-{p1}-{p2}-{p3}"
+    prefix = prefix_map.get(license_type, "FREE24H")
+    token_id = secrets.token_hex(3).upper()
+    now = int(time.time())
+    if license_type == "lifetime" or prefix == "LIFEVIP":
+        exp_hex = "FFFFFFFF"
+    elif license_type == "monthly" or prefix == "PRO30D":
+        exp_hex = f"{now + 30 * 86400:08X}"
+    else:
+        exp_hex = f"{now + 86400:08X}"
+    sig = (
+        hmac.new(
+            WEB24H_HMAC_SECRET,
+            f"KEY:{token_id}:{exp_hex}".encode("utf-8"),
+            hashlib.sha256,
+        )
+        .hexdigest()
+        .upper()[:6]
+    )
+    return f"{prefix}-{token_id}-{exp_hex}-{sig}"
 
 
 def create_license_record(
