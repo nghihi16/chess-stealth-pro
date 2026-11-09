@@ -12,7 +12,18 @@ import time
 import urllib.parse
 
 from PySide6.QtCore import QByteArray, QPointF, QSize, Qt, QTimer
-from PySide6.QtGui import QBrush, QColor, QFont, QIcon, QPainter, QPen, QPixmap, QPolygonF
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QFont,
+    QIcon,
+    QKeySequence,
+    QPainter,
+    QPen,
+    QPixmap,
+    QPolygonF,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -416,6 +427,17 @@ def pixmap_from_data_uri(data_uri: str, size: int) -> QPixmap:
         Qt.AspectRatioMode.KeepAspectRatio,
         Qt.TransformationMode.SmoothTransformation,
     )
+
+
+def get_asset_path(filename: str) -> str:
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    p = os.path.join(base, "assets", filename)
+    if os.path.exists(p):
+        return p
+    p_local = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", filename)
+    if os.path.exists(p_local):
+        return p_local
+    return filename
 
 
 def app_icon() -> QIcon:
@@ -1604,6 +1626,349 @@ class ControlCenterWindow(QWidget):
             self.move_lbl.setStyleSheet(f"color: {hex_c};")
 
 
+# ================= 3D SPLIT-PANE ACTIVATION WINDOW =================
+class ActivationWindow(QWidget):
+    def __init__(self, hwid: str, on_activated_cb=None):
+        super().__init__()
+        self.hwid = hwid
+        self.on_activated_cb = on_activated_cb
+        self._activated = False
+        self.theme = _CURRENT_THEME
+
+        self.setWindowTitle("Chess Stealth Pro — License Activation")
+        self.setFixedSize(840, 520)
+        self.setWindowIcon(app_icon())
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+
+        self._theme_shortcut = QShortcut(QKeySequence("Ctrl+T"), self)
+        self._theme_shortcut.activated.connect(self._toggle_theme)
+
+        self.bg_dark_pix = QPixmap(get_asset_path("activation_bg_dark.png"))
+        self.bg_light_pix = QPixmap(get_asset_path("activation_bg_light.png"))
+
+        self._build_ui()
+        self._apply_theme()
+
+    def closeEvent(self, event):
+        event.accept()
+        if not self._activated:
+            app = QApplication.instance()
+            if app:
+                app.quit()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        pix = self.bg_dark_pix if self.theme == "dark" else self.bg_light_pix
+        if not pix.isNull():
+            painter.drawPixmap(0, 0, self.width(), self.height(), pix)
+        else:
+            painter.fillRect(self.rect(), QColor("#08090d" if self.theme == "dark" else "#f5f5f7"))
+
+    def _build_ui(self):
+        root_layout = QHBoxLayout(self)
+        root_layout.setContentsMargins(36, 28, 32, 28)
+        root_layout.setSpacing(28)
+
+        # ----------------- LEFT PANE -----------------
+        left_pane = QVBoxLayout()
+        left_pane.setContentsMargins(0, 0, 0, 0)
+        left_pane.setSpacing(12)
+
+        brand_row = QHBoxLayout()
+        brand_row.setSpacing(8)
+
+        self.logo_lbl = QLabel()
+        self._update_logo()
+        brand_row.addWidget(self.logo_lbl)
+
+        self.brand_title = QLabel("Chess Stealth")
+        self.brand_title.setObjectName("BrandTitle")
+        brand_row.addWidget(self.brand_title)
+
+        self.brand_badge = QLabel("PRO")
+        self.brand_badge.setObjectName("ProBadge")
+        brand_row.addWidget(self.brand_badge)
+        brand_row.addStretch()
+        left_pane.addLayout(brand_row)
+
+        left_pane.addStretch()
+
+        bottom_left_row = QHBoxLayout()
+        bottom_left_row.setSpacing(10)
+        self.theme_btn = QPushButton("Theme: Dark" if self.theme == "dark" else "Theme: Light")
+        self.theme_btn.setObjectName("ThemeSwitchBtn")
+        self.theme_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.theme_btn.clicked.connect(self._toggle_theme)
+        bottom_left_row.addWidget(self.theme_btn)
+
+        self.ver_lbl = QLabel("v2.2 Stealth")
+        self.ver_lbl.setObjectName("VerLabel")
+        bottom_left_row.addWidget(self.ver_lbl)
+
+        bottom_left_row.addStretch()
+        left_pane.addLayout(bottom_left_row)
+
+        root_layout.addLayout(left_pane, 1)
+
+        # ----------------- RIGHT PANE (FROSTED CARD) -----------------
+        self.card = QFrame()
+        self.card.setObjectName("FrostedCard")
+        self.card.setFixedWidth(400)
+
+        card_layout = QVBoxLayout(self.card)
+        card_layout.setContentsMargins(28, 24, 28, 26)
+        card_layout.setSpacing(14)
+
+        top_link_row = QHBoxLayout()
+        top_link_row.addStretch()
+        self.get_key_link = QPushButton("Get 24h free key")
+        self.get_key_link.setObjectName("TextLink")
+        self.get_key_link.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.get_key_link.clicked.connect(lambda: os.startfile(WEB_GET_KEY_URL))
+        top_link_row.addWidget(self.get_key_link)
+        card_layout.addLayout(top_link_row)
+
+        self.title_lbl = QLabel("Activate")
+        self.title_lbl.setObjectName("ActivateTitle")
+        card_layout.addWidget(self.title_lbl)
+
+        key_sec = QVBoxLayout()
+        key_sec.setSpacing(6)
+        self.key_sec_lbl = QLabel("License key")
+        self.key_sec_lbl.setObjectName("FieldLabel")
+        key_sec.addWidget(self.key_sec_lbl)
+
+        self.key_input = QLineEdit()
+        self.key_input.setObjectName("KeyInput")
+        self.key_input.setPlaceholderText("FREE24H-XXXXXX-XXXXXXXX")
+        self.key_input.returnPressed.connect(self.handle_activate)
+        key_sec.addWidget(self.key_input)
+        card_layout.addLayout(key_sec)
+
+        hwid_sec = QVBoxLayout()
+        hwid_sec.setSpacing(6)
+        self.hwid_sec_lbl = QLabel("Device ID (HWID)")
+        self.hwid_sec_lbl.setObjectName("FieldLabel")
+        hwid_sec.addWidget(self.hwid_sec_lbl)
+
+        hwid_row = QHBoxLayout()
+        hwid_row.setSpacing(8)
+        self.hwid_display = QLabel(self.hwid)
+        self.hwid_display.setObjectName("HwidDisplay")
+        hwid_row.addWidget(self.hwid_display, 1)
+
+        self.copy_btn = QPushButton("Copy")
+        self.copy_btn.setObjectName("CopyPillBtn")
+        self.copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.copy_btn.clicked.connect(self._copy_hwid)
+        hwid_row.addWidget(self.copy_btn)
+        hwid_sec.addLayout(hwid_row)
+        card_layout.addLayout(hwid_sec)
+
+        self.sub_info_lbl = QLabel("Supports 24-hour, 30-day, and lifetime keys")
+        self.sub_info_lbl.setObjectName("SubInfoLabel")
+        card_layout.addWidget(self.sub_info_lbl)
+
+        buy_row = QHBoxLayout()
+        self.buy_link = QPushButton("Buy lifetime key")
+        self.buy_link.setObjectName("TextLink")
+        self.buy_link.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.buy_link.clicked.connect(lambda: os.startfile(BUY_LIFE_URL))
+        buy_row.addWidget(self.buy_link)
+        buy_row.addStretch()
+        card_layout.addLayout(buy_row)
+
+        card_layout.addStretch()
+
+        self.act_btn = QPushButton("ACTIVATE")
+        self.act_btn.setObjectName("ActivateBarBtn")
+        self.act_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.act_btn.clicked.connect(self.handle_activate)
+        card_layout.addWidget(self.act_btn)
+
+        root_layout.addWidget(self.card)
+
+    def _update_logo(self):
+        icon_name = "queen_dark.png" if self.theme == "dark" else "queen_light.png"
+        icon_path = get_asset_path(icon_name)
+        if os.path.exists(icon_path):
+            pix = QPixmap(icon_path).scaled(28, 28, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            self.logo_lbl.setPixmap(pix)
+
+    def _copy_hwid(self):
+        QApplication.clipboard().setText(self.hwid)
+        self.copy_btn.setText("Copied!")
+        QTimer.singleShot(2000, lambda: self.copy_btn.setText("Copy"))
+
+    def _toggle_theme(self):
+        global _CURRENT_THEME
+        self.theme = "light" if self.theme == "dark" else "dark"
+        _CURRENT_THEME = self.theme
+        self._apply_theme()
+        self.update()
+
+    def _apply_theme(self):
+        self._update_logo()
+        self.theme_btn.setText("Theme: Dark" if self.theme == "dark" else "Theme: Light")
+        if self.theme == "dark":
+            self.setStyleSheet("""
+            QWidget { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif; }
+            QLabel#BrandTitle { color: #ffffff; font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
+            QLabel#ProBadge {
+                background-color: #242734; color: #a1a1a6;
+                border-radius: 6px; padding: 2px 6px; font-size: 10px; font-weight: 700;
+            }
+            QLabel#VerLabel {
+                color: #55555c; font-size: 11px; font-weight: 500;
+            }
+            QPushButton#ThemeSwitchBtn {
+                background-color: rgba(255, 255, 255, 0.08); color: #a1a1a6;
+                border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 9px;
+                padding: 6px 14px; font-size: 12px; font-weight: 600;
+            }
+            QPushButton#ThemeSwitchBtn:hover { background-color: rgba(255, 255, 255, 0.15); color: #ffffff; }
+            
+            QFrame#FrostedCard {
+                background-color: rgba(12, 14, 20, 0.78);
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-radius: 20px;
+            }
+            QLabel#ActivateTitle {
+                color: #ffffff; font-size: 38px; font-weight: 800; letter-spacing: -0.03em;
+            }
+            QLabel#FieldLabel {
+                color: #a1a1a6; font-size: 12px; font-weight: 600;
+            }
+            QLineEdit#KeyInput {
+                background-color: rgba(255, 255, 255, 0.05); color: #ffffff;
+                border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 11px;
+                padding: 10px 14px; font-family: 'Consolas', monospace; font-size: 13px; font-weight: 600;
+            }
+            QLineEdit#KeyInput:focus {
+                border: 1.5px solid #0a84ff; background-color: rgba(255, 255, 255, 0.08);
+            }
+            QLabel#HwidDisplay {
+                color: #ffffff; font-family: 'Consolas', monospace; font-size: 13px; font-weight: 600;
+                background-color: rgba(255, 255, 255, 0.04);
+                border: 1px solid rgba(255, 255, 255, 0.10); border-radius: 9px;
+                padding: 8px 12px;
+            }
+            QPushButton#CopyPillBtn {
+                background-color: rgba(255, 255, 255, 0.10); color: #ffffff;
+                border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 9px;
+                padding: 8px 14px; font-size: 12px; font-weight: 600;
+            }
+            QPushButton#CopyPillBtn:hover {
+                background-color: #0a84ff; border-color: #0a84ff;
+            }
+            QLabel#SubInfoLabel {
+                color: #86868b; font-size: 11px; font-weight: 500;
+            }
+            QPushButton#TextLink {
+                background: transparent; color: #a1a1a6; border: none; font-size: 12px; font-weight: 500;
+                text-decoration: underline; padding: 2px 0;
+            }
+            QPushButton#TextLink:hover { color: #0a84ff; }
+            
+            QPushButton#ActivateBarBtn {
+                background-color: #ffffff; color: #000000;
+                border: none; border-radius: 12px;
+                min-height: 48px; font-size: 13px; font-weight: 800; letter-spacing: 0.08em;
+            }
+            QPushButton#ActivateBarBtn:hover { background-color: #f2f2f7; }
+            QPushButton#ActivateBarBtn:pressed { background-color: #e5e5ea; }
+            """)
+        else:
+            self.setStyleSheet("""
+            QWidget { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif; }
+            QLabel#BrandTitle { color: #1d1d1f; font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
+            QLabel#ProBadge {
+                background-color: #e5e5ea; color: #48484a;
+                border-radius: 6px; padding: 2px 6px; font-size: 10px; font-weight: 700;
+            }
+            QLabel#VerLabel {
+                color: #a1a1a6; font-size: 11px; font-weight: 500;
+            }
+            QPushButton#ThemeSwitchBtn {
+                background-color: rgba(0, 0, 0, 0.05); color: #1d1d1f;
+                border: 1px solid rgba(0, 0, 0, 0.12); border-radius: 9px;
+                padding: 6px 14px; font-size: 12px; font-weight: 600;
+            }
+            QPushButton#ThemeSwitchBtn:hover { background-color: rgba(0, 0, 0, 0.08); color: #000000; }
+            
+            QFrame#FrostedCard {
+                background-color: rgba(255, 255, 255, 0.88);
+                border: 1px solid rgba(0, 0, 0, 0.09);
+                border-radius: 20px;
+            }
+            QLabel#ActivateTitle {
+                color: #1d1d1f; font-size: 38px; font-weight: 800; letter-spacing: -0.03em;
+            }
+            QLabel#FieldLabel {
+                color: #48484a; font-size: 12px; font-weight: 600;
+            }
+            QLineEdit#KeyInput {
+                background-color: rgba(255, 255, 255, 0.95); color: #1d1d1f;
+                border: 1px solid #c7c7cc; border-radius: 11px;
+                padding: 10px 14px; font-family: 'Consolas', monospace; font-size: 13px; font-weight: 600;
+            }
+            QLineEdit#KeyInput:focus {
+                border: 1.5px solid #0071e3; background-color: #ffffff;
+            }
+            QLabel#HwidDisplay {
+                color: #1d1d1f; font-family: 'Consolas', monospace; font-size: 13px; font-weight: 600;
+                background-color: rgba(0, 0, 0, 0.03);
+                border: 1px solid #d1d1d6; border-radius: 9px;
+                padding: 8px 12px;
+            }
+            QPushButton#CopyPillBtn {
+                background-color: rgba(0, 0, 0, 0.06); color: #1d1d1f;
+                border: 1px solid #c7c7cc; border-radius: 9px;
+                padding: 8px 14px; font-size: 12px; font-weight: 600;
+            }
+            QPushButton#CopyPillBtn:hover {
+                background-color: #0071e3; color: #ffffff; border-color: #0071e3;
+            }
+            QLabel#SubInfoLabel {
+                color: #6e6e73; font-size: 11px; font-weight: 500;
+            }
+            QPushButton#TextLink {
+                background: transparent; color: #48484a; border: none; font-size: 12px; font-weight: 500;
+                text-decoration: underline; padding: 2px 0;
+            }
+            QPushButton#TextLink:hover { color: #0071e3; }
+            
+            QPushButton#ActivateBarBtn {
+                background-color: #1d1d1f; color: #ffffff;
+                border: none; border-radius: 12px;
+                min-height: 48px; font-size: 13px; font-weight: 800; letter-spacing: 0.08em;
+            }
+            QPushButton#ActivateBarBtn:hover { background-color: #0071e3; }
+            QPushButton#ActivateBarBtn:pressed { background-color: #005bb5; }
+            """)
+
+    def handle_activate(self):
+        k = self.key_input.text().strip()
+        if not k:
+            dlg = ModernAlertDialog("Missing Key", "Please enter your License Key.", is_dark=(self.theme == "dark"), parent=self)
+            dlg.exec()
+            return
+        valid, msg = activate_or_verify_key(API_BASE_URL, k, self.hwid)
+        if valid:
+            self._activated = True
+            try:
+                with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+                    f.write(k)
+            except Exception:
+                pass
+            self.close()
+            if self.on_activated_cb:
+                self.on_activated_cb(k)
+        else:
+            dlg = ModernAlertDialog("Invalid Key", "Invalid Key", is_dark=(self.theme == "dark"), parent=self)
+            dlg.exec()
+
+
 def main():
     global _CURRENT_THEME
     install_scripts_and_extension()
@@ -1641,106 +2006,14 @@ def main():
             app.exec()
             return
 
-    # Chưa có key: Mở màn hình kích hoạt
-    win = QWidget()
-    _ACTIVE_WINDOWS.append(win)
-    win.setObjectName("Root")
-    win.setWindowTitle("CHESS STEALTH")
-    win.setWindowIcon(app_icon())
-    win.setFixedSize(440, 300)
-    win.setStyleSheet(_build_qss(_CURRENT_THEME))
+    # Chưa có key: Mở màn hình kích hoạt Split-pane 3D
+    act_win = ActivationWindow(hwid, on_activated_cb=open_control_center)
+    _ACTIVE_WINDOWS.append(act_win)
+    act_win.show()
 
-    layout = QVBoxLayout(win)
-    layout.setContentsMargins(20, 20, 20, 20)
-    layout.setSpacing(14)
-
-    top = QHBoxLayout()
-    top.setSpacing(10)
-    top.addWidget(build_brand_header())
-    top.addStretch()
-
-    copy_hwid_btn = QPushButton("Copy HWID")
-    copy_hwid_btn.setObjectName("SecondaryBtn")
-    copy_hwid_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-
-    def copy_hwid():
-        QApplication.clipboard().setText(hwid)
-        copy_hwid_btn.setText("Copied")
-
-    copy_hwid_btn.clicked.connect(copy_hwid)
-    top.addWidget(copy_hwid_btn)
-
-    theme_btn = QPushButton("Theme")
-    theme_btn.setObjectName("SecondaryBtn")
-    theme_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-
-    def toggle_theme():
-        global _CURRENT_THEME
-        _CURRENT_THEME = "light" if _CURRENT_THEME == "dark" else "dark"
-        win.setStyleSheet(_build_qss(_CURRENT_THEME))
-
-    theme_btn.clicked.connect(toggle_theme)
-    top.addWidget(theme_btn)
-    layout.addLayout(top)
-
-    card = QFrame()
-    card.setObjectName("Card")
-    card_layout = QVBoxLayout(card)
-    card_layout.setContentsMargins(16, 16, 16, 16)
-    card_layout.setSpacing(12)
-
-    key_input = QLineEdit()
-    key_input.setPlaceholderText("Enter License Key...")
-    key_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    card_layout.addWidget(key_input)
-
-    act_btn = QPushButton("ACTIVATE")
-    act_btn.setObjectName("PrimaryBtn")
-    act_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    card_layout.addWidget(act_btn)
-    layout.addWidget(card)
-
-    bottom = QHBoxLayout()
-    bottom.setSpacing(10)
-
-    get_key_btn = QPushButton("Get 24h Key")
-    get_key_btn.setObjectName("SecondaryBtn")
-    get_key_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    get_key_btn.clicked.connect(lambda: os.startfile(WEB_GET_KEY_URL))
-    bottom.addWidget(get_key_btn)
-
-    buy_btn = QPushButton("Buy VIP Key")
-    buy_btn.setObjectName("SecondaryBtn")
-    buy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    buy_btn.clicked.connect(lambda: os.startfile(BUY_LIFE_URL))
-    bottom.addWidget(buy_btn)
-    layout.addLayout(bottom)
-
-    def handle_activate():
-        k = key_input.text().strip()
-        if not k:
-            dlg = ModernAlertDialog("Missing Key", "Please enter your License Key.", is_dark=(_CURRENT_THEME == "dark"), parent=win)
-            dlg.exec()
-            return
-        valid, msg = activate_or_verify_key(API_BASE_URL, k, hwid)
-        if valid:
-            try:
-                with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-                    f.write(k)
-            except Exception:
-                pass
-            win.close()
-            open_control_center(k)
-        else:
-            dlg = ModernAlertDialog("Invalid Key", "Invalid Key", is_dark=(_CURRENT_THEME == "dark"), parent=win)
-            dlg.exec()
-
-    act_btn.clicked.connect(handle_activate)
-    key_input.returnPressed.connect(handle_activate)
-
-    win.show()
     if url_scheme_key:
-        QTimer.singleShot(250, handle_activate)
+        act_win.key_input.setText(url_scheme_key)
+        QTimer.singleShot(250, act_win.handle_activate)
 
     app.exec()
 
