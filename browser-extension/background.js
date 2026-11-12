@@ -1,4 +1,4 @@
-const SESSION_TOKEN = 'cc0acef66d63ec3819807239a1b58c21dcc6dcc11a59b5e7';
+const SESSION_TOKEN = '21494df307f8e10c49d900caef7fdedb6cb746f28a54f346';
 let sfReady = false;
 let currentBestMove = '';
 let currentDepth = '';
