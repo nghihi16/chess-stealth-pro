@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import os
 import sys
 import tempfile
@@ -16,6 +18,7 @@ def isolated_test_db():
     fd, temp_db = tempfile.mkstemp(suffix=".sqlite3")
     os.close(fd)
     os.environ["CHESSPRO_DB_PATH"] = temp_db
+    os.environ.setdefault("CHESSPRO_WEBHOOK_SECRET", "SECURE_TEST_WEBHOOK_SECRET_2026")
     run_migrations(seed_defaults=True)
     yield temp_db
     try:
@@ -108,32 +111,23 @@ def test_hwid_reset_monthly_limit():
     assert res3["success"] is False
 
 
-def test_claim_free_key_unique_url_and_payment_webhook():
+def test_claim_free_key_unique_url():
     client = TestClient(app)
 
-    # 1. Tạo lượt lấy key 24h -> Sinh ra URL duy nhất
+    # 1. Tạo lượt lấy key 24h -> Sinh ra URL duy nhất (không lộ raw key trong phản hồi HTTP ban đầu)
     c1 = client.post("/claim-free-key", json={"hwid": "MY-HWID-01"}).json()
     assert c1["success"] is True
-    assert c1["key"].startswith("FREE24H-")
+    assert c1.get("key") is None
     token = c1["token"]
 
     # 2. Mở URL duy nhất lần 1 và F5 lần 2 -> Cùng trả về đúng 1 Key đó
     page1 = client.get(f"/key/{token}")
     page2 = client.get(f"/key/{token}")
     assert page1.status_code == 200
-    assert c1["key"] in page1.text
+    assert "FREE24H-" in page1.text
     assert page1.text == page2.text
 
     # 3. Đổi 1 ký tự trên URL -> Bị chặn 403 Forbidden
     bad_token = token[:-1] + ("A" if token[-1] != "A" else "B")
     page_bad = client.get(f"/key/{bad_token}")
     assert page_bad.status_code == 403
-
-    # 4. Webhook thanh toán tự động tạo Key 30 ngày & Lifetime
-    w1 = client.post(
-        "/webhook/payment",
-        json={"amount": 5.0, "currency": "USD", "method": "stripe", "webhook_ref": "TX_1001"},
-    ).json()
-    assert w1["success"] is True
-    assert w1["license_type"] == "lifetime"
-    assert w1["license_key"].startswith("LIFEVIP-")

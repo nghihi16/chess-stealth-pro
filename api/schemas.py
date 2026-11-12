@@ -59,20 +59,3 @@ class ClaimFreeKeyResponse(BaseModel):
     key: Optional[str] = None
     expires_at: Optional[int] = None
     message: str
-
-
-class PaymentWebhookRequest(BaseModel):
-    amount: float = Field(..., gt=0)
-    currency: Literal["USD", "VND"] = "USD"
-    method: str = Field(default="vietqr_sepay", max_length=64)
-    webhook_ref: str = Field(..., min_length=3, max_length=128)
-    plan: Optional[Literal["monthly", "lifetime"]] = None
-
-
-class PaymentWebhookResponse(BaseModel):
-    success: bool
-    payment_id: int
-    license_key: str
-    license_type: Literal["monthly", "lifetime"]
-    already_processed: bool
-    message: str

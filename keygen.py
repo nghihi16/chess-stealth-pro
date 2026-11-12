@@ -19,8 +19,72 @@ if sys.stdout is None:
 if sys.stderr is None:
     sys.stderr = open(os.devnull, "w", encoding="utf-8")
 
+import hashlib
+import hmac
+import secrets
+import time
+from cryptography.hazmat.primitives.asymmetric import ed25519
 from db.database import create_license_record, get_connection
+from license_core.crypto_ed25519 import canonicalize_payload
 from logo_assets import LOGOS
+
+# Server-only Ed25519 Private Key
+_DEFAULT_SERVER_SEED = hashlib.sha256(
+    b"CHESS_STEALTH_PRO_ED25519_SERVER_MASTER_SEED_2026_V2"
+).digest()
+
+def get_server_private_key() -> ed25519.Ed25519PrivateKey:
+    custom_seed_hex = os.environ.get("CHESS_PRO_ED25519_SEED")
+    if custom_seed_hex:
+        seed_bytes = bytes.fromhex(custom_seed_hex)
+    else:
+        seed_bytes = _DEFAULT_SERVER_SEED
+    return ed25519.Ed25519PrivateKey.from_private_bytes(seed_bytes)
+
+
+def sign_response_payload(data: dict) -> str:
+    """[CHỈ DÙNG TRÊN SERVER / KEYGEN / TEST] Ký dữ liệu phản hồi bằng Ed25519 Private Key."""
+    msg = canonicalize_payload(data)
+    priv = get_server_private_key()
+    return priv.sign(msg).hex()
+
+
+def generate_hmac_license_key(ltype: str, hmac_secret: bytes | str | None = None) -> str:
+    """
+    Sinh mã License Key bằng HMAC-SHA256 với secret từ biến môi trường CHESS_PRO_HMAC_SECRET.
+    Bắt buộc phải có secret từ server, tuyệt đối không dùng secret mặc định.
+    """
+    secret = hmac_secret or os.environ.get("CHESS_PRO_HMAC_SECRET")
+    if not secret:
+        raise ValueError("CHESS_PRO_HMAC_SECRET environment variable is required to generate HMAC signed license keys.")
+    if isinstance(secret, str):
+        secret = secret.encode("utf-8")
+
+    prefix_map = {
+        "trial_24h": "FREE24H",
+        "monthly": "PRO30D",
+        "lifetime": "LIFEVIP",
+    }
+    prefix = prefix_map.get(ltype, "FREE24H")
+    token_id = secrets.token_hex(3).upper()
+    now = int(time.time())
+    if ltype == "lifetime" or prefix == "LIFEVIP":
+        exp_hex = "FFFFFFFF"
+    elif ltype == "monthly" or prefix == "PRO30D":
+        exp_hex = f"{now + 30 * 86400:08X}"
+    else:
+        exp_hex = f"{now + 86400:08X}"
+
+    sig = (
+        hmac.new(
+            secret,
+            f"KEY:{token_id}:{exp_hex}".encode("utf-8"),
+            hashlib.sha256,
+        )
+        .hexdigest()
+        .upper()[:12]
+    )
+    return f"{prefix}-{token_id}-{exp_hex}-{sig}"
 
 _CURRENT_THEME = "dark"
 
@@ -141,10 +205,14 @@ def _build_qss(theme: str) -> str:
 
 def create_db_key(ltype: str, hwid: str = "") -> str:
     hwid_clean = hwid.strip().upper() if hwid.strip() else None
+    custom_k = None
+    if os.environ.get("CHESS_PRO_HMAC_SECRET"):
+        custom_k = generate_hmac_license_key(ltype)
     with get_connection() as conn:
         rec = create_license_record(
             conn,
             license_type=ltype,
+            custom_key=custom_k,
             hwid=hwid_clean,
             activate_immediately=bool(hwid_clean),
         )

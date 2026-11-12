@@ -10,7 +10,6 @@
 
 const DEFAULT_SECRET = "CHESS_STEALTH_PRO_WEB24H_SECRET_2026";
 const DEFAULT_FRONTEND = "https://nghihi16.github.io/chess-stealth-pro";
-const DEFAULT_ADMIN_PW = "admin_chess_pro_2026";
 const DEFAULT_ADMIN_SLUG = "admin-788a9acf0094e887";
 
 const SHORTENER_LINKS = {
@@ -32,11 +31,35 @@ const SHORTENER_LINKS = {
   },
 };
 
+const securityHeaders = {
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https:; frame-ancestors 'none';",
+};
+
 const publicCorsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  ...securityHeaders,
 };
+
+function getAdminCorsHeaders(request, env) {
+  const origin = request.headers.get("Origin") || "";
+  const allowedFrontend = (env.FRONTEND_URL || DEFAULT_FRONTEND).replace(/\/+$/, "");
+  const requestUrl = new URL(request.url);
+  const allowedOrigins = [allowedFrontend, requestUrl.origin];
+  const headers = { ...securityHeaders };
+  if (origin && allowedOrigins.includes(origin)) {
+    headers["Access-Control-Allow-Origin"] = origin;
+    headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
+    headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization";
+    headers["Access-Control-Allow-Credentials"] = "true";
+    headers["Vary"] = "Origin";
+  }
+  return headers;
+}
 
 const enc = new TextEncoder();
 
@@ -59,10 +82,12 @@ function timingSafeEqualStr(a, b) {
   if (typeof a !== "string" || typeof b !== "string") return false;
   const bufA = enc.encode(a);
   const bufB = enc.encode(b);
-  if (bufA.byteLength !== bufB.byteLength) return false;
-  let c = 0;
-  for (let i = 0; i < bufA.byteLength; i++) {
-    c |= bufA[i] ^ bufB[i];
+  const len = Math.max(bufA.byteLength, bufB.byteLength);
+  let c = bufA.byteLength ^ bufB.byteLength;
+  for (let i = 0; i < len; i++) {
+    const byteA = i < bufA.byteLength ? bufA[i] : 0;
+    const byteB = i < bufB.byteLength ? bufB[i] : 0;
+    c |= byteA ^ byteB;
   }
   return c === 0;
 }
@@ -91,11 +116,11 @@ function parseCookies(cookieHeader) {
 }
 
 async function verifyAdminSession(request, env, secret, expectedPass) {
+  if (!expectedPass || typeof expectedPass !== "string" || expectedPass.trim() === "") {
+    return false; // Fail closed if admin password is unset
+  }
   const sessionToken = await hmacSha256("ADMIN_SESSION:" + expectedPass, secret);
   const validTokens = [sessionToken];
-  if (DEFAULT_ADMIN_PW !== expectedPass) {
-    validTokens.push(await hmacSha256("ADMIN_SESSION:" + DEFAULT_ADMIN_PW, secret));
-  }
 
   // 1. Check HttpOnly cookie
   const cookies = parseCookies(request.headers.get("Cookie") || "");
@@ -106,14 +131,14 @@ async function verifyAdminSession(request, env, secret, expectedPass) {
     }
   }
 
-  // 2. Check Authorization header: Bearer <sessionToken or adminPassword>
+  // 2. Check Authorization header: Bearer <sessionToken or expectedPass>
   const authHeader = request.headers.get("Authorization");
   if (authHeader && authHeader.startsWith("Bearer ")) {
     const bearer = authHeader.slice(7).trim();
     for (const vt of validTokens) {
       if (timingSafeEqualStr(bearer, vt)) return true;
     }
-    if (timingSafeEqualStr(bearer, expectedPass) || timingSafeEqualStr(bearer, DEFAULT_ADMIN_PW)) {
+    if (timingSafeEqualStr(bearer, expectedPass)) {
       return true;
     }
   }
@@ -123,17 +148,32 @@ async function verifyAdminSession(request, env, secret, expectedPass) {
 
 export default {
   async fetch(request, env) {
-    if (request.method === "OPTIONS") {
-      return new Response(null, { headers: publicCorsHeaders });
-    }
-
     const url = new URL(request.url);
     const secret = env.SECRET_KEY || DEFAULT_SECRET;
     const frontendUrl = (env.FRONTEND_URL || DEFAULT_FRONTEND).replace(/\/+$/, "");
-    const adminPassword = (env.ADMIN_PASSWORD || DEFAULT_ADMIN_PW).trim();
+    const adminPassword = (env.ADMIN_PASSWORD || "").trim();
     const adminSlug = (env.ADMIN_PATH || DEFAULT_ADMIN_SLUG).replace(/^\/+|\/+$/g, "");
     const adminBasePath = `/${adminSlug}`;
     const nowSec = Math.floor(Date.now() / 1000);
+
+    const isAdminRoute = url.pathname === adminBasePath || url.pathname.startsWith(adminBasePath + "/") ||
+                         url.pathname === "/admin" || url.pathname.startsWith("/admin/") ||
+                         url.pathname.startsWith("/api/admin");
+
+    if (request.method === "OPTIONS") {
+      if (isAdminRoute) {
+        return new Response(null, { headers: getAdminCorsHeaders(request, env) });
+      }
+      return new Response(null, { headers: publicCorsHeaders });
+    }
+
+    // Block /admin, /admin/, and /api/admin/* with 404 to prevent administrative path leakage
+    if (url.pathname === "/admin" || url.pathname === "/admin/" || url.pathname.startsWith("/api/admin")) {
+      return new Response(JSON.stringify({ error: "Not Found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json", ...securityHeaders },
+      });
+    }
 
     // 1. Health check
     if (url.pathname === "/api/health") {
@@ -199,10 +239,17 @@ export default {
       }
 
       let isRevoked = false;
+      let kvRecord = null;
+      let boundHwid = null;
       if (env.KEYS_KV) {
         try {
           const revoked = await env.KEYS_KV.get(`revoked:${cleanKey}`);
           if (revoked) isRevoked = true;
+          const rawRecord = await env.KEYS_KV.get(`key:${cleanKey}`);
+          if (rawRecord) {
+            kvRecord = JSON.parse(rawRecord);
+            boundHwid = kvRecord.hwid || null;
+          }
         } catch (_) {}
       }
 
@@ -221,6 +268,31 @@ export default {
             headers: { "Content-Type": "application/json", ...publicCorsHeaders },
           }
         );
+      }
+
+      const reqHwid = (url.searchParams.get("hwid") || "").trim().toUpperCase();
+      if (boundHwid && reqHwid && boundHwid !== reqHwid) {
+        return new Response(
+          JSON.stringify({
+            valid: false,
+            hwidMismatch: true,
+            error: "HWID Mismatch: Key đã được kích hoạt trên thiết bị khác",
+            message: `Key này đã được khóa vào thiết bị khác (${boundHwid}).`,
+            hwid: boundHwid,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json", ...publicCorsHeaders },
+          }
+        );
+      }
+      if (!boundHwid && reqHwid && kvRecord && env.KEYS_KV) {
+        try {
+          kvRecord.hwid = reqHwid;
+          const putOptions = kvRecord.expSec ? { expiration: kvRecord.expSec } : {};
+          await env.KEYS_KV.put(`key:${cleanKey}`, JSON.stringify(kvRecord), putOptions);
+          boundHwid = reqHwid;
+        } catch (_) {}
       }
 
       if (prefix === "LIFEVIP" || expHex === "FFFFFFFF") {
@@ -246,6 +318,7 @@ export default {
             typeName: "Vĩnh Viễn (Lifetime VIP)",
             signatureValid: true,
             isLifetime: true,
+            hwid: boundHwid,
             expired: false,
             revoked: false,
             remainingSec: null,
@@ -315,6 +388,7 @@ export default {
           typeName: typeName,
           signatureValid: true,
           isLifetime: false,
+          hwid: boundHwid,
           expired: false,
           revoked: false,
           remainingSec,
@@ -433,6 +507,7 @@ export default {
             key: licenseKey,
             type: "24h",
             provider: prov,
+            hwid: null,
             createdAt: nowSec,
             expSec: expSec,
             status: "active",
@@ -458,7 +533,20 @@ export default {
     // ==========================================
 
     // Admin Login API (Rate limiting + Secure HttpOnly Cookie + Session Token)
-    if ((url.pathname === `${adminBasePath}/api/login` || url.pathname === "/api/admin/login") && request.method === "POST") {
+    if (url.pathname === `${adminBasePath}/api/login` && request.method === "POST") {
+      if (!adminPassword) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: "Quản trị viên chưa được cấu hình mật khẩu bảo mật trong Worker secrets.",
+          }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json", ...getAdminCorsHeaders(request, env) },
+          }
+        );
+      }
+
       const clientIp = request.headers.get("CF-Connecting-IP") || "0.0.0.0";
       const rateKey = `rate_login:${clientIp}`;
       let fails = 0;
@@ -475,7 +563,7 @@ export default {
           }),
           {
             status: 429,
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", ...getAdminCorsHeaders(request, env) },
           }
         );
       }
@@ -484,7 +572,20 @@ export default {
         const body = await request.json();
         const inputPw = (body.password || "").trim();
 
-        const isMatch = timingSafeEqualStr(inputPw, adminPassword) || timingSafeEqualStr(inputPw, DEFAULT_ADMIN_PW);
+        if (!inputPw) {
+          return new Response(
+            JSON.stringify({
+              success: false,
+              error: "Vui lòng nhập mật khẩu",
+            }),
+            {
+              status: 400,
+              headers: { "Content-Type": "application/json", ...getAdminCorsHeaders(request, env) },
+            }
+          );
+        }
+
+        const isMatch = timingSafeEqualStr(inputPw, adminPassword);
         if (!isMatch) {
           fails += 1;
           if (env.KEYS_KV) {
@@ -492,11 +593,12 @@ export default {
           }
           return new Response(
             JSON.stringify({
+              success: false,
               error: `Mật khẩu quản trị viên không chính xác! (Còn ${Math.max(0, 5 - fails)} lần thử)`,
             }),
             {
               status: 401,
-              headers: { "Content-Type": "application/json" },
+              headers: { "Content-Type": "application/json", ...getAdminCorsHeaders(request, env) },
             }
           );
         }
@@ -508,6 +610,10 @@ export default {
         const sessionToken = await hmacSha256("ADMIN_SESSION:" + adminPassword, secret);
         const headers = new Headers();
         headers.set("Content-Type", "application/json");
+        const adminCors = getAdminCorsHeaders(request, env);
+        for (const [k, v] of Object.entries(adminCors)) {
+          headers.set(k, v);
+        }
         headers.set(
           "Set-Cookie",
           `csp_admin_session=${sessionToken}; Path=/; Max-Age=86400; HttpOnly; Secure; SameSite=Lax`
@@ -526,15 +632,19 @@ export default {
       } catch (err) {
         return new Response(JSON.stringify({ error: err.message }), {
           status: 500,
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getAdminCorsHeaders(request, env) },
         });
       }
     }
 
     // Admin Logout API
-    if ((url.pathname === `${adminBasePath}/api/logout` || url.pathname === "/api/admin/logout") && request.method === "POST") {
+    if (url.pathname === `${adminBasePath}/api/logout` && request.method === "POST") {
       const headers = new Headers();
       headers.set("Content-Type", "application/json");
+      const adminCors = getAdminCorsHeaders(request, env);
+      for (const [k, v] of Object.entries(adminCors)) {
+        headers.set(k, v);
+      }
       headers.set(
         "Set-Cookie",
         "csp_admin_session=deleted; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax"
@@ -546,12 +656,19 @@ export default {
     }
 
     // Admin API: List all active keys
-    if (url.pathname === "/api/admin/keys" || url.pathname === `${adminBasePath}/api/keys`) {
+    if (url.pathname === `${adminBasePath}/api/keys`) {
+      if (!adminPassword) {
+        return new Response(JSON.stringify({ error: "Unauthorized: Quản trị viên chưa cấu hình mật khẩu" }), {
+          status: 500,
+          headers: { "Content-Type": "application/json", ...getAdminCorsHeaders(request, env) },
+        });
+      }
+
       const isAuth = await verifyAdminSession(request, env, secret, adminPassword);
       if (!isAuth) {
         return new Response(JSON.stringify({ error: "Unauthorized: Phiên đăng nhập quản trị không hợp lệ" }), {
           status: 401,
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getAdminCorsHeaders(request, env) },
         });
       }
 
@@ -564,6 +681,7 @@ export default {
             if (val) {
               try {
                 const data = JSON.parse(val);
+                data.hwid = data.hwid || null;
                 if (data.type === "lifetime" || data.expSec === null) {
                   data.isLifetime = true;
                   data.remainingSec = null;
@@ -583,17 +701,25 @@ export default {
 
       keysList.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       return new Response(JSON.stringify({ success: true, count: keysList.length, keys: keysList }), {
-        headers: { "Content-Type": "application/json" },
+        status: 200,
+        headers: { "Content-Type": "application/json", ...getAdminCorsHeaders(request, env) },
       });
     }
 
     // Admin API: Revoke a key
-    if ((url.pathname === "/api/admin/revoke" || url.pathname === `${adminBasePath}/api/revoke`) && request.method === "POST") {
+    if (url.pathname === `${adminBasePath}/api/revoke` && request.method === "POST") {
+      if (!adminPassword) {
+        return new Response(JSON.stringify({ error: "Unauthorized: Quản trị viên chưa cấu hình mật khẩu" }), {
+          status: 500,
+          headers: { "Content-Type": "application/json", ...getAdminCorsHeaders(request, env) },
+        });
+      }
+
       const isAuth = await verifyAdminSession(request, env, secret, adminPassword);
       if (!isAuth) {
         return new Response(JSON.stringify({ error: "Unauthorized" }), {
           status: 401,
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getAdminCorsHeaders(request, env) },
         });
       }
 
@@ -604,37 +730,49 @@ export default {
           await env.KEYS_KV.delete(`key:${targetKey}`);
           await env.KEYS_KV.put(`revoked:${targetKey}`, "1", { expirationTtl: 86400 * 365 });
           return new Response(JSON.stringify({ success: true, revoked: targetKey }), {
-            headers: { "Content-Type": "application/json" },
+            status: 200,
+            headers: { "Content-Type": "application/json", ...getAdminCorsHeaders(request, env) },
           });
         }
         return new Response(JSON.stringify({ error: "Thiếu mã key" }), {
           status: 400,
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getAdminCorsHeaders(request, env) },
         });
       } catch (err) {
         return new Response(JSON.stringify({ error: err.message }), {
           status: 500,
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getAdminCorsHeaders(request, env) },
         });
       }
     }
 
     // Admin API: Generate Key manually (24h, 30d, lifetime)
-    if ((url.pathname === "/api/admin/generate" || url.pathname === `${adminBasePath}/api/generate`) && request.method === "POST") {
+    if (url.pathname === `${adminBasePath}/api/generate` && request.method === "POST") {
+      if (!adminPassword) {
+        return new Response(JSON.stringify({ error: "Unauthorized: Quản trị viên chưa cấu hình mật khẩu" }), {
+          status: 500,
+          headers: { "Content-Type": "application/json", ...getAdminCorsHeaders(request, env) },
+        });
+      }
+
       const isAuth = await verifyAdminSession(request, env, secret, adminPassword);
       if (!isAuth) {
         return new Response(JSON.stringify({ error: "Unauthorized" }), {
           status: 401,
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getAdminCorsHeaders(request, env) },
         });
       }
 
       let keyType = "24h";
       let keyNote = "";
+      let keyHwid = null;
       try {
         const body = await request.json();
         if (body.type) keyType = body.type.toLowerCase();
         if (body.note) keyNote = String(body.note).slice(0, 100);
+        if (body.hwid && typeof body.hwid === "string") {
+          keyHwid = body.hwid.trim().toUpperCase().slice(0, 64) || null;
+        }
       } catch (_) {}
 
       const tokenId = randomHex(6);
@@ -679,6 +817,7 @@ export default {
             type: keyType,
             provider: "admin",
             note: keyNote,
+            hwid: keyHwid || null,
             createdAt: nowSec,
             expSec: expSec,
             status: "active",
@@ -693,19 +832,90 @@ export default {
           success: true,
           key: licenseKey,
           type: keyType,
+          hwid: keyHwid || null,
           expSec: expSec,
           isLifetime: keyType === "lifetime",
         }),
         {
-          headers: { "Content-Type": "application/json" },
+          status: 200,
+          headers: { "Content-Type": "application/json", ...getAdminCorsHeaders(request, env) },
         }
       );
+    }
+
+    // Admin API: Bind or unbind HWID for a key
+    if (url.pathname === `${adminBasePath}/api/bind-hwid` && request.method === "POST") {
+      if (!adminPassword) {
+        return new Response(JSON.stringify({ error: "Unauthorized: Quản trị viên chưa cấu hình mật khẩu" }), {
+          status: 500,
+          headers: { "Content-Type": "application/json", ...getAdminCorsHeaders(request, env) },
+        });
+      }
+
+      const isAuth = await verifyAdminSession(request, env, secret, adminPassword);
+      if (!isAuth) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json", ...getAdminCorsHeaders(request, env) },
+        });
+      }
+
+      try {
+        const body = await request.json();
+        const targetKey = (body.key || "").trim().toUpperCase();
+        if (!targetKey) {
+          return new Response(JSON.stringify({ error: "Thiếu mã key" }), {
+            status: 400,
+            headers: { "Content-Type": "application/json", ...getAdminCorsHeaders(request, env) },
+          });
+        }
+
+        const newHwid = body.hwid ? String(body.hwid).trim().toUpperCase().slice(0, 64) : null;
+        if (!env.KEYS_KV) {
+          return new Response(JSON.stringify({ error: "KV storage không khả dụng" }), {
+            status: 500,
+            headers: { "Content-Type": "application/json", ...getAdminCorsHeaders(request, env) },
+          });
+        }
+
+        const raw = await env.KEYS_KV.get(`key:${targetKey}`);
+        if (!raw) {
+          return new Response(JSON.stringify({ error: "Không tìm thấy key trong hệ thống" }), {
+            status: 404,
+            headers: { "Content-Type": "application/json", ...getAdminCorsHeaders(request, env) },
+          });
+        }
+
+        const record = JSON.parse(raw);
+        record.hwid = newHwid || null;
+        const putOptions = record.expSec ? { expiration: record.expSec } : {};
+        await env.KEYS_KV.put(`key:${targetKey}`, JSON.stringify(record), putOptions);
+
+        return new Response(JSON.stringify({ success: true, key: targetKey, hwid: record.hwid }), {
+          status: 200,
+          headers: { "Content-Type": "application/json", ...getAdminCorsHeaders(request, env) },
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500,
+          headers: { "Content-Type": "application/json", ...getAdminCorsHeaders(request, env) },
+        });
+      }
     }
 
     // ==========================================
     // 6. ADMIN HTML USER INTERFACE (Full KV Key Management Dashboard)
     // ==========================================
     if (url.pathname === adminBasePath || url.pathname === `${adminBasePath}/`) {
+      if (!adminPassword) {
+        return new Response(
+          "Cảnh báo bảo mật: ADMIN_PASSWORD chưa được thiết lập trong Worker secrets. Cổng quản trị bị khóa an toàn.",
+          {
+            status: 500,
+            headers: { "Content-Type": "text/plain; charset=utf-8", ...securityHeaders },
+          }
+        );
+      }
       const html = `<!DOCTYPE html>
 <html lang="vi">
 <head>
@@ -957,6 +1167,47 @@ export default {
     }
     .btn-copy:hover {
       background: #0f172a;
+      border-color: var(--cyan);
+    }
+    .hwid-badge {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 11px;
+      font-weight: 600;
+      background: rgba(56, 189, 248, 0.08);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      color: var(--cyan);
+      padding: 3px 8px;
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      letter-spacing: 0.02em;
+    }
+    .hwid-empty {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-style: italic;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn-hwid {
+      background: #1e293b;
+      color: var(--text-sub);
+      border: 1px solid #334155;
+      padding: 4px 8px;
+      font-size: 11px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-weight: 500;
+      transition: all 0.15s ease;
+    }
+    .btn-hwid:hover {
+      background: #334155;
+      color: #ffffff;
       border-color: var(--cyan);
     }
 
@@ -1322,9 +1573,14 @@ export default {
 
     <!-- Fast Generator Bar -->
     <section class="gen-actions-card">
-      <div style="font-size: 14px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px;">
-        <svg class="svg-icon" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        <span>Tạo Mã Key Mới Ngay:</span>
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        <div style="font-size: 14px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px;">
+          <svg class="svg-icon" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          <span>Tạo Mã Key Mới:</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <input type="text" id="gen-hwid" placeholder="Gán HWID máy khách (tùy chọn)..." style="max-width: 290px; min-height:36px; padding:6px 10px; font-size:12px; font-family:monospace;"/>
+        </div>
       </div>
       <div class="gen-buttons-group">
         <button class="btn btn-amber" onclick="createKey('24h')">
@@ -1362,13 +1618,15 @@ export default {
       <div class="table-header-tools">
         <div class="search-input-box">
           <svg class="svg-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="text" id="search-input" placeholder="Lọc theo mã key hoặc loại..."/>
+          <input type="text" id="search-input" placeholder="Tìm theo Mã Key, HWID (máy), loại gói..."/>
         </div>
         <div class="filter-pills">
           <button class="filter-pill active" data-filter="all">Tất cả</button>
           <button class="filter-pill" data-filter="24h">24 Giờ</button>
           <button class="filter-pill" data-filter="30d">30 Ngày</button>
           <button class="filter-pill" data-filter="lifetime">Lifetime</button>
+          <button class="filter-pill" data-filter="has-hwid">Đã gắn máy</button>
+          <button class="filter-pill" data-filter="no-hwid">Chưa gắn</button>
           <button class="btn btn-secondary" id="refresh-btn" style="min-height:36px; padding:6px 12px; margin-left:8px;">
             <svg class="svg-icon" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
             <span>Làm mới</span>
@@ -1382,6 +1640,7 @@ export default {
             <tr>
               <th>Mã Key Bản Quyền</th>
               <th>Gói Bản Quyền</th>
+              <th>Thiết Bị (HWID Máy)</th>
               <th>Thời Gian Cấp & Hết Hạn</th>
               <th>Thời Gian Còn Lại</th>
               <th>Trạng Thái</th>
@@ -1390,7 +1649,7 @@ export default {
           </thead>
           <tbody id="keys-tbody">
             <tr>
-              <td colspan="6">
+              <td colspan="7">
                 <div class="empty-state">
                   <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                   <span>Chưa có dữ liệu key.</span>
@@ -1588,14 +1847,19 @@ export default {
         if (currentFilterType === '24h') matchesFilter = keyUpper.startsWith('FREE24H') || k.type === '24h';
         else if (currentFilterType === '30d') matchesFilter = keyUpper.startsWith('PRO30D') || k.type === '30d';
         else if (currentFilterType === 'lifetime') matchesFilter = keyUpper.startsWith('LIFEVIP') || k.type === 'lifetime' || k.isLifetime;
+        else if (currentFilterType === 'has-hwid') matchesFilter = Boolean(k.hwid);
+        else if (currentFilterType === 'no-hwid') matchesFilter = !k.hwid;
 
         if (!matchesFilter) return false;
         if (!search) return true;
-        return k.key.toLowerCase().includes(search) || (k.provider || '').toLowerCase().includes(search) || (k.type || '').toLowerCase().includes(search);
+        return k.key.toLowerCase().includes(search) || 
+               (k.hwid || '').toLowerCase().includes(search) ||
+               (k.provider || '').toLowerCase().includes(search) || 
+               (k.type || '').toLowerCase().includes(search);
       });
 
       if (filtered.length === 0) {
-        tbody.innerHTML = \`<tr><td colspan="6"><div class="empty-state"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><span>\${rawKeysData.length === 0 ? "Hiện tại chưa có key nào trong Cloudflare KV. Bấm các nút phía trên để tạo key mới." : "Không tìm thấy key nào khớp với bộ lọc."}</span></div></td></tr>\`;
+        tbody.innerHTML = \`<tr><td colspan="7"><div class="empty-state"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><span>\${rawKeysData.length === 0 ? "Hiện tại chưa có key nào trong Cloudflare KV. Bấm các nút phía trên để tạo key mới." : "Không tìm thấy key nào khớp với bộ lọc."}</span></div></td></tr>\`;
         return;
       }
 
@@ -1616,6 +1880,40 @@ export default {
           tagHtml = '<span class="tag tag-30d">30 NGÀY</span>';
         }
 
+        let hwidHtml = '';
+        if (k.hwid) {
+          const rawHwid = String(k.hwid);
+          const shortHwid = rawHwid.length > 22 ? rawHwid.slice(0, 10) + '...' + rawHwid.slice(-8) : rawHwid;
+          hwidHtml = \`
+            <div style="display:flex; flex-direction:column; gap:4px; align-items:flex-start;">
+              <div class="hwid-badge" title="\${escapeHtml(rawHwid)}">
+                <svg class="svg-icon" style="width:12px; height:12px;" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                <span>\${escapeHtml(shortHwid)}</span>
+              </div>
+              <div style="display:flex; gap:6px;">
+                <button class="btn-hwid" onclick="copyKey('\${escapeHtml(rawHwid)}')" title="Sao chép HWID máy">
+                  <svg class="svg-icon" style="width:11px; height:11px;" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  <span>Chép</span>
+                </button>
+                <button class="btn-hwid" onclick="bindHwidPrompt('\${safeKey}', '\${escapeHtml(rawHwid)}')" title="Đổi hoặc gỡ HWID">
+                  <svg class="svg-icon" style="width:11px; height:11px;" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                  <span>Đổi</span>
+                </button>
+              </div>
+            </div>
+          \`;
+        } else {
+          hwidHtml = \`
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span class="hwid-empty">Chưa gắn máy</span>
+              <button class="btn-hwid" onclick="bindHwidPrompt('\${safeKey}', '')" title="Gán HWID máy cho key này">
+                <svg class="svg-icon" style="width:11px; height:11px;" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                <span>Gán máy</span>
+              </button>
+            </div>
+          \`;
+        }
+
         return \`
           <tr id="row-\${safeKey}">
             <td>
@@ -1630,6 +1928,9 @@ export default {
             <td>
               \${tagHtml}
               <div class="time-sub">Nguồn: \${escapeHtml((k.provider || 'ADMIN').toUpperCase())}</div>
+            </td>
+            <td>
+              \${hwidHtml}
             </td>
             <td>
               <div>\${escapeHtml(createdDate)}</div>
@@ -1707,13 +2008,44 @@ export default {
       }
     }
 
+    async function bindHwidPrompt(key, currentHwid) {
+      const input = prompt(
+        "Nhập HWID máy (Hardware ID) cho key:\n" + key + "\n\n(Lưu ý: Để trống và bấm OK nếu muốn hủy gán máy để cho phép máy khác kích hoạt)",
+        currentHwid || ""
+      );
+      if (input === null) return;
+      const targetHwid = input.trim();
+      try {
+        const res = await fetch('${adminBasePath}/api/bind-hwid', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          credentials: 'same-origin',
+          body: JSON.stringify({ key, hwid: targetHwid })
+        });
+        if (res.status === 401) {
+          loginOverlay.style.display = 'flex';
+          return;
+        }
+        const d = await res.json();
+        if (d.success) {
+          showToast(targetHwid ? 'Đã gán HWID thành công!' : 'Đã hủy gán máy (Unbind HWID) thành công!');
+          loadKeys();
+        } else {
+          alert('Lỗi: ' + (d.error || 'Không thể cập nhật HWID'));
+        }
+      } catch (err) {
+        alert('Lỗi mạng: ' + err.message);
+      }
+    }
+
     async function createKey(type) {
+      const hwidVal = (document.getElementById('gen-hwid')?.value || '').trim();
       try {
         const res = await fetch('${adminBasePath}/api/generate', {
           method: 'POST',
           headers: getAuthHeaders(),
           credentials: 'same-origin',
-          body: JSON.stringify({ type })
+          body: JSON.stringify({ type, hwid: hwidVal })
         });
         if (res.status === 401) {
           loginOverlay.style.display = 'flex';
@@ -1722,7 +2054,10 @@ export default {
         const d = await res.json();
         if (d.success) {
           navigator.clipboard.writeText(d.key).catch(() => {});
-          showToast('Đã tạo & sao chép key ' + type.toUpperCase() + ': ' + d.key);
+          const hwidNote = d.hwid ? ' (Đã gắn HWID: ' + d.hwid + ')' : '';
+          showToast('Đã tạo & sao chép key ' + type.toUpperCase() + ': ' + d.key + hwidNote);
+          const genHwidInput = document.getElementById('gen-hwid');
+          if (genHwidInput) genHwidInput.value = '';
           loadKeys();
         } else {
           alert('Lỗi: ' + (d.error || 'Không tạo được key'));
@@ -1750,10 +2085,14 @@ export default {
         const timeInfo = d.isLifetime
           ? '<b style="color:var(--green);">Bản Quyền Vĩnh Viễn (Lifetime VIP)</b>'
           : \`<b style="color:var(--cyan);">\${escapeHtml(d.hoursLeft)} Giờ</b> (\${escapeHtml(d.minutesLeft)} phút)\`;
+        const hwidInfo = d.hwid
+          ? \`<span style="font-family:monospace; color:var(--cyan); font-weight:700;">\${escapeHtml(d.hwid)}</span>\`
+          : \`<span style="color:var(--text-muted); font-style:italic;">Chưa gắn máy (Tự động nhận diện & khóa máy đầu tiên kích hoạt)</span>\`;
 
         inspectResult.innerHTML = \`
           <div><b>Mã Key:</b> <span style="font-family:monospace; color:#fff;">\${escapeHtml(d.key)}</span></div>
           <div><b>Gói Bản Quyền:</b> <span style="font-weight:700; color:var(--cyan);">\${escapeHtml(d.typeName)}</span></div>
+          <div><b>Thiết Bị (HWID Máy):</b> \${hwidInfo}</div>
           <div><b>Trạng Thái:</b> \${statusHtml}</div>
           <div><b>Thời Gian Còn Lại:</b> \${timeInfo}</div>
           <div><b>Thời Điểm Hết Hạn:</b> \${escapeHtml(expDate)}</div>
@@ -1799,16 +2138,13 @@ export default {
 </body>
 </html>`;
       return new Response(html, {
-        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
+        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", ...securityHeaders },
       });
     }
 
-    // Convenient redirect: /admin -> secret slug
-    if (url.pathname === "/admin" || url.pathname === "/admin/") {
-      return Response.redirect(`${url.origin}${adminBasePath}`, 302);
-    }
-
     // Default: Redirect to frontend
-    return Response.redirect(frontendUrl, 302);
+    const fallbackHeaders = new Headers(securityHeaders);
+    fallbackHeaders.set("Location", frontendUrl);
+    return new Response(null, { status: 302, headers: fallbackHeaders });
   },
 };

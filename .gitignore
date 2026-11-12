@@ -2,6 +2,13 @@ __pycache__/
 *.py[cod]
 build/
 dist/
+dist_setup/
+build_setup/work/
+build_setup/payload/
+build_setup/payload.zip
+*.pkg
+*.zip
+*.log
 *.spec
 *.exe
 *.sqlite3

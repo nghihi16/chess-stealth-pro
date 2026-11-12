@@ -14,8 +14,6 @@ from api.schemas import (
     ActivateRequest,
     ClaimFreeKeyRequest,
     ClaimFreeKeyResponse,
-    PaymentWebhookRequest,
-    PaymentWebhookResponse,
     ResetHwidRequest,
     ResetHwidResponse,
     SignedLicenseResponse,
@@ -27,8 +25,7 @@ from db.database import (
     ensure_web24h_key_in_db,
     get_connection,
 )
-from license_core.crypto_ed25519 import sign_response_payload
-from payment_webhooks.handlers import process_payment_webhook, verify_webhook_signature
+from keygen import sign_response_payload
 
 router = APIRouter()
 
@@ -38,11 +35,18 @@ SHORTENER_PROVIDER = os.environ.get("SHORTENER_PROVIDER", "NONE")
 SHORTENER_API_KEY = os.environ.get("SHORTENER_API_KEY", "")
 
 
+TRUSTED_PROXIES = {"127.0.0.1", "::1", "localhost", "testclient"}
+
+
 def _client_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "127.0.0.1"
+    direct_host = request.client.host if request.client else "127.0.0.1"
+    if direct_host in TRUSTED_PROXIES:
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded and forwarded.strip():
+            client_ip = forwarded.split(",")[0].strip()
+            if client_ip:
+                return client_ip
+    return direct_host
 
 
 def _build_signed_response(
@@ -421,7 +425,7 @@ async def claim_free_key(req: ClaimFreeKeyRequest, request: Request):
             token=info["token"],
             claim_url=info["claim_url"],
             shortened_url=shortened,
-            key=info["key"],
+            key=None,
             expires_at=info["expires_at"],
             message="Đã khởi tạo URL nhận Key 24h duy nhất.",
         )
@@ -490,39 +494,6 @@ async def view_unique_key_page(token: str):
         return HTMLResponse(
             content=_render_key_html(row["license_key"], int(row["expires_at"]), token_id),
             status_code=200,
-        )
-
-
-# ============================================================================
-# 5. POST /webhook/payment — Tự động sinh Key 30 ngày / Lifetime khi thanh toán
-# ============================================================================
-@router.post("/webhook/payment", response_model=PaymentWebhookResponse)
-async def payment_webhook(
-    payload: PaymentWebhookRequest,
-    request: Request,
-    x_webhook_signature: str | None = Header(default=None),
-):
-    if x_webhook_signature:
-        raw_body = await request.body()
-        if not verify_webhook_signature(raw_body, x_webhook_signature):
-            raise HTTPException(status_code=401, detail="Chữ ký Webhook không hợp lệ.")
-
-    with get_connection() as conn:
-        res = process_payment_webhook(
-            conn=conn,
-            amount=payload.amount,
-            currency=payload.currency,
-            method=payload.method,
-            webhook_ref=payload.webhook_ref,
-            plan_override=payload.plan,
-        )
-        return PaymentWebhookResponse(
-            success=True,
-            payment_id=res["payment_id"],
-            license_key=res["license_key"],
-            license_type=res["license_type"],
-            already_processed=res["already_processed"],
-            message=f"Đã tạo tự động mã Key gói {res['license_type']}.",
         )
 
 

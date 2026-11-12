@@ -127,8 +127,30 @@ CREATE TABLE IF NOT EXISTS public.free_key_claims (
     expires_at BIGINT NOT NULL
 );
 ALTER TABLE public.free_key_claims ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'claimed';
-CREATE INDEX IF NOT EXISTS idx_free_key_claims_ip ON public.free_key_claims(ip);
-CREATE INDEX IF NOT EXISTS idx_free_key_claims_token ON public.free_key_claims(token);
+CREATE INDEX IF NOT EXISTS idx_free_key_claims_ip ON free_key_claims(ip);
+CREATE INDEX IF NOT EXISTS idx_free_key_claims_token ON free_key_claims(token);
+
+ALTER TABLE public.licenses ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.activation_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.payments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.free_key_claims ENABLE ROW LEVEL SECURITY;
+
+REVOKE ALL ON public.licenses FROM anon, public;
+REVOKE ALL ON public.activation_logs FROM anon, public;
+REVOKE ALL ON public.payments FROM anon, public;
+REVOKE ALL ON public.free_key_claims FROM anon, public;
+
+CREATE POLICY "service_role_licenses" ON public.licenses
+    FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+CREATE POLICY "service_role_activation_logs" ON public.activation_logs
+    FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+CREATE POLICY "service_role_payments" ON public.payments
+    FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+CREATE POLICY "service_role_free_key_claims" ON public.free_key_claims
+    FOR ALL TO service_role USING (true) WITH CHECK (true);
 """
 
 
@@ -273,15 +295,21 @@ def generate_formatted_key(license_type: str) -> str:
         exp_hex = f"{now + 30 * 86400:08X}"
     else:
         exp_hex = f"{now + 86400:08X}"
-    sig = (
-        hmac.new(
-            WEB24H_HMAC_SECRET,
-            f"KEY:{token_id}:{exp_hex}".encode("utf-8"),
-            hashlib.sha256,
+
+    hmac_secret_env = os.environ.get("CHESS_PRO_HMAC_SECRET")
+    if hmac_secret_env:
+        sig = (
+            hmac.new(
+                hmac_secret_env.encode("utf-8"),
+                f"KEY:{token_id}:{exp_hex}".encode("utf-8"),
+                hashlib.sha256,
+            )
+            .hexdigest()
+            .upper()[:12]
         )
-        .hexdigest()
-        .upper()[:6]
-    )
+    else:
+        # Sử dụng entropy ngẫu nhiên mật mã học an toàn khi không cấu hình server HMAC secret
+        sig = secrets.token_hex(6).upper()
     return f"{prefix}-{token_id}-{exp_hex}-{sig}"
 
 
@@ -315,68 +343,17 @@ def create_license_record(
     return dict(row)
 
 
-WEB24H_HMAC_SECRET = b"CHESS_STEALTH_PRO_WEB24H_SECRET_2026"
-
-
 def ensure_web24h_key_in_db(conn, clean_key: str) -> Optional[dict]:
     """
-    Xác thực chữ ký HMAC-SHA256 của các License Key được sinh từ Web Admin / Web Get Key:
-    Hỗ trợ FREE24H, PRO07D, PRO30D, LIFEVIP.
-    Nếu hợp lệ, tự động lưu vào bảng licenses của SQLite để kích hoạt tức thì không cần mạng.
+    Tra cứu license key hợp lệ từ cơ sở dữ liệu.
+    LƯU Ý BẢO MẬT: Đã loại bỏ hoàn toàn cơ chế offline HMAC fallback tự động chèn key giả mạo.
+    Mọi key phải được tạo hợp lệ qua Server / Database chính thức.
     """
-    parts = clean_key.strip().upper().split("-")
-    if len(parts) != 4:
-        return None
-
-    prefix, token_id, exp_hex, key_sig = parts
-    if prefix not in ("FREE24H", "PRO07D", "PRO30D", "LIFEVIP"):
-        return None
-    if len(token_id) != 6 or len(exp_hex) != 8 or len(key_sig) != 6:
-        return None
-
-    is_lifetime = (prefix == "LIFEVIP" or exp_hex == "FFFFFFFF")
-    exp_ts = None
-    if not is_lifetime:
-        try:
-            exp_ts = int(exp_hex, 16)
-        except ValueError:
-            return None
-
-    expected_sig = (
-        hmac.new(
-            WEB24H_HMAC_SECRET,
-            f"KEY:{token_id}:{exp_hex}".encode("utf-8"),
-            hashlib.sha256,
-        )
-        .hexdigest()
-        .upper()[:6]
-    )
-    if not hmac.compare_digest(key_sig, expected_sig):
-        return None
-
-    now = int(time.time())
-    if not is_lifetime and exp_ts is not None and exp_ts <= now:
-        return None
-
-    if prefix == "FREE24H":
-        ltype = "trial_24h"
-    elif prefix == "LIFEVIP":
-        ltype = "lifetime"
-    else:
-        ltype = "monthly"
-
-    existing = conn.execute("SELECT * FROM licenses WHERE key = ?", (clean_key,)).fetchone()
+    clean = clean_key.strip().upper()
+    existing = conn.execute(
+        "SELECT * FROM licenses WHERE UPPER(TRIM(key)) = UPPER(TRIM(?))", (clean,)
+    ).fetchone()
     if existing:
         return dict(existing)
-
-    cursor = conn.execute(
-        """
-        INSERT INTO licenses (key, type, status, hwid, hwid_reset_count, created_at, activated_at, expires_at)
-        VALUES (?, ?, 'active', NULL, 0, ?, NULL, ?)
-        """,
-        (clean_key, ltype, now, exp_ts),
-    )
-    conn.commit()
-    row = conn.execute("SELECT * FROM licenses WHERE id = ?", (cursor.lastrowid,)).fetchone()
-    return dict(row) if row else None
+    return None
 

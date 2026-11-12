@@ -52,10 +52,33 @@ CREATE TABLE IF NOT EXISTS public.free_key_claims (
 CREATE INDEX IF NOT EXISTS idx_free_key_claims_ip ON public.free_key_claims(ip);
 CREATE INDEX IF NOT EXISTS idx_free_key_claims_token ON public.free_key_claims(token);
 
--- Seed default test keys
+-- Seed default test keys (Active commercial lifetime and monthly keys removed for security hardening)
 INSERT INTO public.licenses (key, type, status, created_at, expires_at)
 VALUES
-    ('FREE-TEST-1DAY', 'trial_24h', 'active', EXTRACT(EPOCH FROM NOW())::BIGINT, (EXTRACT(EPOCH FROM NOW())::BIGINT + 86400)),
-    ('PRO30D-TEST-MONTH', 'monthly', 'active', EXTRACT(EPOCH FROM NOW())::BIGINT, (EXTRACT(EPOCH FROM NOW())::BIGINT + 2592000)),
-    ('LIFE-VIP-9999', 'lifetime', 'active', EXTRACT(EPOCH FROM NOW())::BIGINT, NULL)
+    ('FREE-TEST-1DAY', 'trial_24h', 'active', EXTRACT(EPOCH FROM NOW())::BIGINT, (EXTRACT(EPOCH FROM NOW())::BIGINT + 86400))
 ON CONFLICT (key) DO NOTHING;
+
+-- ============================================================================
+-- Row Level Security (RLS) Hardening
+-- ============================================================================
+ALTER TABLE public.licenses ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.activation_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.payments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.free_key_claims ENABLE ROW LEVEL SECURITY;
+
+REVOKE ALL ON public.licenses FROM anon, public;
+REVOKE ALL ON public.activation_logs FROM anon, public;
+REVOKE ALL ON public.payments FROM anon, public;
+REVOKE ALL ON public.free_key_claims FROM anon, public;
+
+CREATE POLICY "service_role_licenses" ON public.licenses
+    FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+CREATE POLICY "service_role_activation_logs" ON public.activation_logs
+    FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+CREATE POLICY "service_role_payments" ON public.payments
+    FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+CREATE POLICY "service_role_free_key_claims" ON public.free_key_claims
+    FOR ALL TO service_role USING (true) WITH CHECK (true);
