@@ -258,9 +258,10 @@ def install_scripts_and_extension() -> str:
     except Exception:
         pass
 
-    # 2. Universal Userscript for Tampermonkey / Violentmonkey on ANY browser (internal in APP_DIR only)
+    # 2. Universal Userscript for Tampermonkey / Violentmonkey on ANY browser
     userscript_paths = [
         os.path.join(APP_DIR, "chess-assist.user.js"),
+        os.path.join(desktop_folder, "chess-assist.user.js"),
     ]
     for up in userscript_paths:
         try:
@@ -271,7 +272,8 @@ def install_scripts_and_extension() -> str:
 
     # 3. Chromium Extension (Chrome, Brave, Edge, Cốc Cốc, Opera)
     ext_dir = os.path.join(APP_DIR, "browser-extension")
-    all_ext_dirs = [ext_dir]
+    desktop_ext_dir = os.path.join(desktop_folder, "browser-extension")
+    all_ext_dirs = [ext_dir, desktop_ext_dir]
 
     try:
         manifest = {
@@ -281,7 +283,10 @@ def install_scripts_and_extension() -> str:
             "description": "Zero-DOM bridge for Windows Stealth Overlay with WDA_EXCLUDEFROMCAPTURE.",
             "permissions": ["storage"],
             "host_permissions": ["*://*.chess.com/*", "http://127.0.0.1:8765/*"],
-            "background": {"service_worker": "background.js"},
+            "background": {
+                "service_worker": "background.js",
+                "scripts": ["background.js"]
+            },
             "content_scripts": [
                 {
                     "matches": ["*://*.chess.com/*", "*://chess.com/*"],
@@ -294,7 +299,13 @@ def install_scripts_and_extension() -> str:
                     "resources": ["stockfish.js"],
                     "matches": ["*://*.chess.com/*", "*://chess.com/*"]
                 }
-            ]
+            ],
+            "browser_specific_settings": {
+                "gecko": {
+                    "id": "chess-stealth@zerodom.local",
+                    "strict_min_version": "109.0"
+                }
+            }
         }
         for target_dir in all_ext_dirs:
             os.makedirs(target_dir, exist_ok=True)
@@ -536,9 +547,48 @@ def install_scripts_and_extension() -> str:
         # Automatically hook user's existing normal browser shortcuts (Desktop, Taskbar, Start Menu)
         # so opening their normal browser automatically loads the Stealth extension on their default profile
         hook_user_browser_shortcuts(ext_dir)
+        register_firefox_policy(ext_dir)
     except Exception:
         pass
     return ext_dir
+
+
+def register_firefox_policy(ext_dir: str):
+    """
+    If a signed .xpi exists in ext_dir or APP_DIR, registers it in HKCU\\Software\\Policies\\Mozilla\\Firefox\\ExtensionSettings
+    so Firefox force-installs and activates it permanently on startup.
+    Also creates a zip package ready for AMO unlisted signing.
+    """
+    if sys.platform != "win32" or "PYTEST_CURRENT_TEST" in os.environ:
+        return
+    try:
+        import zipfile
+        zip_path = os.path.join(APP_DIR, "firefox-extension-ready-for-signing.zip")
+        if not os.path.exists(zip_path) or (time.time() - os.path.getmtime(zip_path) > 3600):
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for fn in ("manifest.json", "content.js", "background.js", "stockfish.js"):
+                    fp = os.path.join(ext_dir, fn)
+                    if os.path.exists(fp):
+                        zf.write(fp, arcname=fn)
+
+        xpi_candidates = [
+            os.path.join(ext_dir, "chess-stealth.xpi"),
+            os.path.join(APP_DIR, "chess-stealth.xpi"),
+        ]
+        active_xpi = next((p for p in xpi_candidates if os.path.exists(p)), None)
+        if active_xpi:
+            import winreg
+            uri_path = "file:///" + os.path.abspath(active_xpi).replace("\\", "/")
+            policy_data = {
+                "chess-stealth@zerodom.local": {
+                    "installation_mode": "force_installed",
+                    "install_url": uri_path
+                }
+            }
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Policies\Mozilla\Firefox") as key:
+                winreg.SetValueEx(key, "ExtensionSettings", 0, winreg.REG_SZ, json.dumps(policy_data))
+    except Exception:
+        pass
 
 
 def hook_user_browser_shortcuts(ext_dir: str):
