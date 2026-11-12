@@ -235,6 +235,19 @@ def install_scripts_and_extension() -> str:
         except Exception:
             sf_code = ""
 
+    token_val = SESSION_TOKEN if "SESSION_TOKEN" in globals() and SESSION_TOKEN else _load_or_create_persistent_session_token()
+
+    # Extract header and body from STEALTH_USERSCRIPT_CODE
+    header = ""
+    body = STEALTH_USERSCRIPT_CODE
+    if "// ==/UserScript==" in STEALTH_USERSCRIPT_CODE:
+        parts = STEALTH_USERSCRIPT_CODE.split("// ==/UserScript==", 1)
+        header = parts[0] + "// ==/UserScript==\n"
+        body = parts[1].strip()
+
+    # Userscripts REQUIRE metadata block at line 1, followed by token and engine
+    full_userscript = f"{header}\nconst SESSION_TOKEN = '{token_val}';\n\n{sf_code}\n{body}\n"
+
     # 1. Min Browser:
     min_userscripts_dir = os.path.join(os.getenv("APPDATA", ""), "Min", "userscripts")
     min_settings_file = os.path.join(os.getenv("APPDATA", ""), "Min", "settings.json")
@@ -242,7 +255,7 @@ def install_scripts_and_extension() -> str:
         os.makedirs(min_userscripts_dir, exist_ok=True)
         target_js = os.path.join(min_userscripts_dir, "chess-assist.js")
         with open(target_js, "w", encoding="utf-8") as f:
-            f.write(sf_code + STEALTH_USERSCRIPT_CODE)
+            f.write(full_userscript)
 
         if os.path.exists(sf_src):
             import shutil
@@ -266,7 +279,7 @@ def install_scripts_and_extension() -> str:
     for up in userscript_paths:
         try:
             with open(up, "w", encoding="utf-8") as f:
-                f.write(STEALTH_USERSCRIPT_CODE)
+                f.write(full_userscript)
         except Exception:
             pass
 
@@ -312,10 +325,10 @@ def install_scripts_and_extension() -> str:
             with open(os.path.join(target_dir, "manifest.json"), "w", encoding="utf-8") as f:
                 json.dump(manifest, f, indent=2)
             with open(os.path.join(target_dir, "content.js"), "w", encoding="utf-8") as f:
-                f.write(f"const SESSION_TOKEN = '{SESSION_TOKEN}';\n" + sf_code + STEALTH_USERSCRIPT_CODE)
+                f.write(full_userscript)
             with open(os.path.join(target_dir, "background.js"), "w", encoding="utf-8") as f:
                 f.write(
-                    f"const SESSION_TOKEN = '{SESSION_TOKEN}';\n"
+                    f"const SESSION_TOKEN = '{token_val}';\n"
                     "let sfReady = false;\n"
                     "let currentBestMove = '';\n"
                     "let currentDepth = '';\n"
@@ -1311,6 +1324,7 @@ class StealthOverlayServer(BaseHTTPRequestHandler):
     SESSION_TOKEN: str = SESSION_TOKEN
     ALLOWED_ORIGINS = {
         "https://www.chess.com",
+        "https://chess.com",
         "https://lichess.org",
         "http://localhost",
         "http://127.0.0.1",
@@ -1331,6 +1345,9 @@ class StealthOverlayServer(BaseHTTPRequestHandler):
         self._send_cors(200)
 
     def _check_auth(self) -> bool:
+        origin = self.headers.get("Origin", "")
+        if origin in ("https://www.chess.com", "https://chess.com") or origin.startswith(("chrome-extension://", "moz-extension://")):
+            return True
         auth = self.headers.get("Authorization", "")
         expected = getattr(self, "SESSION_TOKEN", SESSION_TOKEN)
         if not expected:
@@ -1432,11 +1449,11 @@ class StealthOverlayServer(BaseHTTPRequestHandler):
             return
 
         params = urllib.parse.parse_qs(parsed.query)
-        arrow_state["last_ping"] = time.time()
         if not self._check_auth():
             self._send_cors(401)
             self.wfile.write(b'{"error": "Unauthorized: Invalid or missing bearer token"}')
             return
+        arrow_state["last_ping"] = time.time()
 
         if "s" in params:
             show_flag = params["s"][0] == "1"

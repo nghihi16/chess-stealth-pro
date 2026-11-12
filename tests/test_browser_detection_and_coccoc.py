@@ -83,3 +83,41 @@ def test_firefox_auto_hook_opens_userscript():
         finally:
             os.environ["PYTEST_CURRENT_TEST"] = "1"
 
+
+def test_min_browser_userscript_header_and_token():
+    """Verify that Min userscript starts with // ==UserScript== at line 1 and contains SESSION_TOKEN."""
+    from main import install_scripts_and_extension, SESSION_TOKEN
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with unittest.mock.patch.dict(os.environ, {"APPDATA": tmpdir}):
+            install_scripts_and_extension()
+            min_script = os.path.join(tmpdir, "Min", "userscripts", "chess-assist.js")
+            assert os.path.exists(min_script)
+            with open(min_script, "r", encoding="utf-8") as f:
+                first_line = f.readline().strip()
+                all_content = f.read()
+            assert first_line == "// ==UserScript=="
+            assert f"const SESSION_TOKEN = '{SESSION_TOKEN}';" in all_content
+            assert "setupEngine" in all_content
+
+
+def test_server_origin_auth():
+    """Verify that requests from chess.com Origin pass _check_auth even without token."""
+    from main import StealthOverlayServer
+    import io
+
+    class DummyReq:
+        def makefile(self, *args, **kwargs):
+            return io.BytesIO(b"GET / HTTP/1.1\r\nOrigin: https://www.chess.com\r\n\r\n")
+
+    server_handler = StealthOverlayServer.__new__(StealthOverlayServer)
+    server_handler.headers = {"Origin": "https://www.chess.com"}
+    server_handler.path = "/update"
+    assert server_handler._check_auth() is True
+
+    # But external random site is rejected
+    server_handler.headers = {"Origin": "https://malicious-site.com"}
+    assert server_handler._check_auth() is False
+
+
