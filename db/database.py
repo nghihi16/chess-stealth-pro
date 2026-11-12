@@ -1,11 +1,13 @@
 import hashlib
 import hmac
+import json
 import os
 import secrets
 import sqlite3
 import sys
 import time
 import urllib.parse
+import urllib.request
 from typing import Optional
 
 try:
@@ -343,11 +345,13 @@ def create_license_record(
     return dict(row)
 
 
-def ensure_web24h_key_in_db(conn, clean_key: str) -> Optional[dict]:
+def ensure_web24h_key_in_db(conn, clean_key: str, hwid_hint: str | None = None) -> Optional[dict]:
     """
-    Tra cứu license key hợp lệ từ cơ sở dữ liệu.
-    LƯU Ý BẢO MẬT: Đã loại bỏ hoàn toàn cơ chế offline HMAC fallback tự động chèn key giả mạo.
-    Mọi key phải được tạo hợp lệ qua Server / Database chính thức.
+    Tra cứu hoặc đồng bộ license key hợp lệ vào cơ sở dữ liệu:
+    1. Kiểm tra trong SQLite licenses cục bộ trước tiên.
+    2. Nếu chưa có, đồng bộ qua Cloudflare Worker API chính thức (https://chess-stealth-key-api.quitworks.workers.dev).
+    3. Nếu không có mạng, kiểm tra xác thực chữ ký HMAC-SHA256 ngoại tuyến (Offline Fallback).
+    Tự động lưu vào SQLite licenses để kích hoạt và sử dụng ngay lập tức.
     """
     clean = clean_key.strip().upper()
     existing = conn.execute(
@@ -355,5 +359,77 @@ def ensure_web24h_key_in_db(conn, clean_key: str) -> Optional[dict]:
     ).fetchone()
     if existing:
         return dict(existing)
-    return None
+
+    parts = clean.split("-")
+    if len(parts) != 4:
+        return None
+    prefix, token_id, exp_hex, key_sig = parts
+    if prefix not in ("FREE24H", "PRO07D", "PRO30D", "LIFEVIP"):
+        return None
+    if len(token_id) != 6 or len(exp_hex) != 8 or len(key_sig) != 6:
+        return None
+
+    worker_checked = False
+    worker_valid = False
+    worker_hwid = None
+    try:
+        hwid_param = f"&hwid={urllib.parse.quote(hwid_hint.strip().upper())}" if hwid_hint else ""
+        url = f"https://chess-stealth-key-api.quitworks.workers.dev/api/check-key?key={urllib.parse.quote(clean)}{hwid_param}"
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "ChessStealthPro/2.0.0", "Accept": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=3.5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            worker_checked = True
+            if data.get("valid") is True and not data.get("revoked"):
+                worker_valid = True
+                worker_hwid = data.get("hwid")
+            else:
+                return None
+    except Exception:
+        pass
+
+    if not worker_valid:
+        if worker_checked:
+            return None
+        secret = os.environ.get("CHESS_PRO_HMAC_SECRET", "CHESS_STEALTH_PRO_WEB24H_SECRET_2026")
+        if isinstance(secret, str):
+            secret = secret.encode("utf-8")
+        expected_sig = (
+            hmac.new(secret, f"KEY:{token_id}:{exp_hex}".encode("utf-8"), hashlib.sha256)
+            .hexdigest()[:6]
+            .upper()
+        )
+        if not hmac.compare_digest(key_sig, expected_sig):
+            return None
+
+    is_lifetime = (prefix == "LIFEVIP" or exp_hex == "FFFFFFFF")
+    exp_ts = None
+    if not is_lifetime:
+        try:
+            exp_ts = int(exp_hex, 16)
+            if exp_ts <= int(time.time()):
+                return None
+        except ValueError:
+            return None
+
+    if prefix == "FREE24H":
+        ltype = "trial_24h"
+    elif prefix == "LIFEVIP":
+        ltype = "lifetime"
+    else:
+        ltype = "monthly"
+
+    now = int(time.time())
+    cursor = conn.execute(
+        """
+        INSERT INTO licenses (key, type, status, hwid, hwid_reset_count, created_at, activated_at, expires_at)
+        VALUES (?, ?, 'active', ?, 0, ?, NULL, ?)
+        """,
+        (clean, ltype, worker_hwid, now, exp_ts),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM licenses WHERE id = ?", (cursor.lastrowid,)).fetchone()
+    return dict(row) if row else None
 

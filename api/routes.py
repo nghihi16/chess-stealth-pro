@@ -100,7 +100,7 @@ async def verify_license(req: VerifyRequest, request: Request):
 
     with get_connection() as conn:
         cleanup_expired_records(conn)
-        ensure_web24h_key_in_db(conn, key_clean)
+        ensure_web24h_key_in_db(conn, key_clean, hwid_clean)
         row = conn.execute(
             "SELECT * FROM licenses WHERE key = ?", (key_clean,)
         ).fetchone()
@@ -188,7 +188,7 @@ async def activate_license(req: ActivateRequest, request: Request):
 
     with get_connection() as conn:
         cleanup_expired_records(conn)
-        ensure_web24h_key_in_db(conn, key_clean)
+        ensure_web24h_key_in_db(conn, key_clean, hwid_clean)
         row = conn.execute(
             "SELECT * FROM licenses WHERE key = ?", (key_clean,)
         ).fetchone()
@@ -282,7 +282,7 @@ async def reset_hwid(req: ResetHwidRequest, request: Request):
 
     with get_connection() as conn:
         cleanup_expired_records(conn)
-        ensure_web24h_key_in_db(conn, key_clean)
+        ensure_web24h_key_in_db(conn, key_clean, old_hwid)
         row = conn.execute(
             "SELECT * FROM licenses WHERE key = ?", (key_clean,)
         ).fetchone()

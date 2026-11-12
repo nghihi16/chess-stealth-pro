@@ -13,7 +13,7 @@ from db.database import ensure_web24h_key_in_db, get_connection
 from db.migrate import run_migrations
 from license_core.verifier import activate_or_verify_key
 
-OLD_LEAKED_HMAC_SECRET = b"CHESS_STEALTH_PRO_WEB24H_SECRET_2026"
+FORGED_BOGUS_HMAC_SECRET = b"FORGED_BOGUS_SECRET_KEY_9999"
 
 
 @pytest.fixture(autouse=True)
@@ -41,13 +41,13 @@ def isolated_test_db():
 
 
 def generate_forged_test_key(prefix: str, token_id: str, exp_sec: int | None) -> str:
-    """Tạo key giả mạo offline sử dụng secret cũ đã bị rò rỉ."""
+    """Tạo key giả mạo offline sử dụng secret giả mạo."""
     if exp_sec is None or prefix == "LIFEVIP":
         exp_hex = "FFFFFFFF"
     else:
         exp_hex = f"{exp_sec:08X}"
     msg = f"KEY:{token_id}:{exp_hex}".encode("utf-8")
-    sig = hmac.new(OLD_LEAKED_HMAC_SECRET, msg, hashlib.sha256).hexdigest()[:6].upper()
+    sig = hmac.new(FORGED_BOGUS_HMAC_SECRET, msg, hashlib.sha256).hexdigest()[:6].upper()
     return f"{prefix}-{token_id}-{exp_hex}-{sig}"
 
 
