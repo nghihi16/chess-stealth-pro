@@ -2010,7 +2010,7 @@ export default {
 
     async function bindHwidPrompt(key, currentHwid) {
       const input = prompt(
-        "Nhập HWID máy (Hardware ID) cho key:\n" + key + "\n\n(Lưu ý: Để trống và bấm OK nếu muốn hủy gán máy để cho phép máy khác kích hoạt)",
+        "Nhập HWID máy (Hardware ID) cho key:\\n" + key + "\\n\\n(Lưu ý: Để trống và bấm OK nếu muốn hủy gán máy để cho phép máy khác kích hoạt)",
         currentHwid || ""
       );
       if (input === null) return;
