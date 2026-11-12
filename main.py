@@ -1117,7 +1117,7 @@ def hook_user_browser_shortcuts(ext_dir: str):
                         if fn.lower().endswith(".lnk") and "chess stealth" not in fn.lower():
                             lnk_files.append(os.path.join(root_d, fn))
 
-        target_exes = ("brave.exe", "chrome.exe", "msedge.exe", "opera.exe", "browser.exe", "vivaldi.exe")
+        target_exes = ("brave.exe", "chrome.exe", "msedge.exe", "opera.exe", "browser.exe", "coccoc.exe", "vivaldi.exe")
         ext_arg = f'--load-extension="{ext_dir}" --disable-features=DisableLoadExtensionCommandLineSwitch'
 
         vbs_lines = ['On Error Resume Next', 'Set oWS = CreateObject("WScript.Shell")']
@@ -1197,6 +1197,9 @@ BROWSER_PATHS = {
         os.path.join(os.getenv("LOCALAPPDATA", ""), "CocCoc", "Browser", "Application", "browser.exe"),
         r"C:\Program Files\CocCoc\Browser\Application\browser.exe",
         r"C:\Program Files (x86)\CocCoc\Browser\Application\browser.exe",
+        os.path.join(os.getenv("LOCALAPPDATA", ""), "CocCoc", "Browser", "Application", "coccoc.exe"),
+        r"C:\Program Files\CocCoc\Browser\Application\coccoc.exe",
+        r"C:\Program Files (x86)\CocCoc\Browser\Application\coccoc.exe",
     ],
     "opera": [
         os.path.join(os.getenv("LOCALAPPDATA", ""), "Programs", "Opera", "opera.exe"),
@@ -1215,44 +1218,45 @@ BROWSER_PATHS = {
 
 
 KNOWN_BROWSERS = {
-    "chrome.exe": "Google Chrome",
-    "msedge.exe": "Microsoft Edge",
-    "brave.exe": "Brave",
-    "opera.exe": "Opera",
-    "browser.exe": "Cốc Cốc",
-    "firefox.exe": "Mozilla Firefox",
-    "min.exe": "Min Browser",
-    "vivaldi.exe": "Vivaldi",
-    "arc.exe": "Arc",
+    "chrome.exe": ("Google Chrome", "chrome"),
+    "msedge.exe": ("Microsoft Edge", "edge"),
+    "brave.exe": ("Brave", "brave"),
+    "opera.exe": ("Opera", "opera"),
+    "opera_gx.exe": ("Opera GX", "opera"),
+    "browser.exe": ("Cốc Cốc", "coccoc"),
+    "coccoc.exe": ("Cốc Cốc", "coccoc"),
+    "firefox.exe": ("Mozilla Firefox", "firefox"),
+    "min.exe": ("Min Browser", "min"),
+    "vivaldi.exe": ("Vivaldi", "vivaldi"),
+    "arc.exe": ("Arc", "arc"),
 }
 
 
 def get_browser_from_hwnd(hwnd: int) -> tuple[str, str]:
     if not hwnd:
-        return ("Web Browser", "browser")
+        return ("", "")
     user32 = ctypes.windll.user32
     kernel32 = ctypes.windll.kernel32
     if not user32.IsWindow(hwnd):
-        return ("Web Browser", "browser")
+        return ("", "")
     pid = wintypes.DWORD()
     user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
     if pid.value == 0:
-        return ("Web Browser", "browser")
+        return ("", "")
     PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
     h_proc = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
     if not h_proc:
-        return ("Web Browser", "browser")
+        return ("", "")
     try:
         buf = ctypes.create_unicode_buffer(512)
         size = wintypes.DWORD(512)
         if kernel32.QueryFullProcessImageNameW(h_proc, 0, buf, ctypes.byref(size)):
             exe_name = os.path.basename(buf.value).lower()
-            disp_name = KNOWN_BROWSERS.get(exe_name, exe_name.replace(".exe", "").title())
-            key_name = exe_name.replace(".exe", "")
-            return (disp_name, key_name)
+            if exe_name in KNOWN_BROWSERS:
+                return KNOWN_BROWSERS[exe_name]
     finally:
         kernel32.CloseHandle(h_proc)
-    return ("Web Browser", "browser")
+    return ("", "")
 
 
 def get_windows_default_browser() -> str:
@@ -1298,11 +1302,13 @@ def detect_active_chess_browser() -> dict | None:
         user32.GetWindowTextW(h, b, l + 1)
         title = b.value
         title_lower = title.lower()
-        if "chess stealth" in title_lower:
+        if any(ign in title_lower for ign in ("chess stealth", "setup", "installer", "cài đặt")):
             return None
         if not ("chess" in title_lower or "lichess" in title_lower):
             return None
         disp_name, key_name = get_browser_from_hwnd(h)
+        if not disp_name or not key_name:
+            return None
         return {"name": disp_name, "key": key_name, "hwnd": h, "title": title}
 
     fg = user32.GetForegroundWindow()
@@ -1432,12 +1438,30 @@ def auto_hook_running_browser(detected_info: dict) -> bool:
         return False
     b_key = detected_info.get("key", "")
     hwnd = detected_info.get("hwnd", 0)
-    if b_key not in ("chrome", "edge", "brave", "coccoc", "opera"):
+    if b_key not in ("chrome", "edge", "brave", "coccoc", "opera", "vivaldi"):
         return False
     if b_key in _AUTO_HOOK_HIST:
         return False
 
-    exe_path = find_browser_exe(b_key)
+    exe_path = None
+    if hwnd:
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if pid.value:
+            h_proc = kernel32.OpenProcess(0x1000, False, pid.value)
+            if h_proc:
+                try:
+                    buf = ctypes.create_unicode_buffer(512)
+                    size = wintypes.DWORD(512)
+                    if kernel32.QueryFullProcessImageNameW(h_proc, 0, buf, ctypes.byref(size)):
+                        exe_path = buf.value
+                finally:
+                    kernel32.CloseHandle(h_proc)
+
+    if not exe_path or not os.path.exists(exe_path):
+        exe_path = find_browser_exe(b_key)
     if not exe_path or not os.path.exists(exe_path):
         return False
 
@@ -1449,27 +1473,13 @@ def auto_hook_running_browser(detected_info: dict) -> bool:
     def _reload_worker():
         try:
             exe_name = os.path.basename(exe_path)
-            chk = subprocess.run(
-                [
-                    "powershell",
-                    "-NoProfile",
-                    "-WindowStyle",
-                    "Hidden",
-                    "-Command",
-                    f"(Get-CimInstance Win32_Process -Filter \"Name='{exe_name}'\" | Select-Object -ExpandProperty CommandLine) -join ' '",
-                ],
-                capture_output=True,
-                text=True,
-                creationflags=0x08000000,
-                timeout=4,
-            )
-            if "--load-extension" in (chk.stdout or "") or arrow_state.get("last_ping", 0.0) > 0.0:
+            if arrow_state.get("last_ping", 0.0) > 0.0:
                 return
 
             user32 = ctypes.windll.user32
             if hwnd and user32.IsWindow(hwnd):
                 user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE for clean session save
-            time.sleep(0.35)
+            time.sleep(0.4)
             subprocess.run(
                 ["taskkill", "/F", "/IM", exe_name],
                 stdout=subprocess.DEVNULL,
@@ -1477,7 +1487,7 @@ def auto_hook_running_browser(detected_info: dict) -> bool:
                 creationflags=0x08000000,
                 timeout=4,
             )
-            time.sleep(0.25)
+            time.sleep(0.3)
             subprocess.Popen(
                 [
                     exe_path,
@@ -1753,12 +1763,29 @@ def compute_auto_aligned_arrow(
         return None
 
 
-SESSION_TOKEN = secrets.token_hex(24)
+def _load_or_create_persistent_session_token() -> str:
+    token_file = os.path.join(APP_DIR, "session.token")
+    try:
+        os.makedirs(APP_DIR, exist_ok=True)
+        if os.path.exists(token_file):
+            with open(token_file, "r", encoding="utf-8") as f:
+                saved = f.read().strip()
+                if len(saved) >= 32:
+                    return saved
+        new_token = secrets.token_hex(24)
+        with open(token_file, "w", encoding="utf-8") as f:
+            f.write(new_token)
+        return new_token
+    except Exception:
+        return secrets.token_hex(24)
+
+
+SESSION_TOKEN = _load_or_create_persistent_session_token()
 
 
 def generate_session_token() -> str:
     global SESSION_TOKEN
-    SESSION_TOKEN = secrets.token_hex(24)
+    SESSION_TOKEN = _load_or_create_persistent_session_token()
     return SESSION_TOKEN
 
 

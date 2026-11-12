@@ -38,9 +38,11 @@ def isolate_test_state():
     clock_file = os.path.join(temp_dir, "clock_test.json")
     nonce_file = os.path.join(temp_dir, "nonce_test.json")
     cache_file = os.path.join(temp_dir, "verified_session.json")
+    db_file = os.path.join(temp_dir, "test_chess.db")
 
     os.environ["CHESSPRO_CLOCK_GUARD_PATH"] = clock_file
     os.environ["CHESSPRO_NONCE_STORE_PATH"] = nonce_file
+    os.environ["CHESSPRO_DB_PATH"] = db_file
     orig_cache = verifier_mod.CACHE_FILE
     verifier_mod.CACHE_FILE = cache_file
 

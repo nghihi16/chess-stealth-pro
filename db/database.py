@@ -364,7 +364,7 @@ def ensure_web24h_key_in_db(conn, clean_key: str, hwid_hint: str | None = None) 
     if len(parts) != 4:
         return None
     prefix, token_id, exp_hex, key_sig = parts
-    if prefix not in ("FREE24H", "PRO07D", "PRO30D", "LIFEVIP"):
+    if prefix != "FREE24H":
         return None
     if len(token_id) != 6 or len(exp_hex) != 8 or len(key_sig) != 6:
         return None
@@ -391,18 +391,7 @@ def ensure_web24h_key_in_db(conn, clean_key: str, hwid_hint: str | None = None) 
         pass
 
     if not worker_valid:
-        if worker_checked:
-            return None
-        secret = os.environ.get("CHESS_PRO_HMAC_SECRET", "CHESS_STEALTH_PRO_WEB24H_SECRET_2026")
-        if isinstance(secret, str):
-            secret = secret.encode("utf-8")
-        expected_sig = (
-            hmac.new(secret, f"KEY:{token_id}:{exp_hex}".encode("utf-8"), hashlib.sha256)
-            .hexdigest()[:6]
-            .upper()
-        )
-        if not hmac.compare_digest(key_sig, expected_sig):
-            return None
+        return None
 
     is_lifetime = (prefix == "LIFEVIP" or exp_hex == "FFFFFFFF")
     exp_ts = None
