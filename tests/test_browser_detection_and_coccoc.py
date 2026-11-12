@@ -53,3 +53,33 @@ def test_persistent_session_token():
     assert len(token1) >= 32
     assert token1 == token2
     assert SESSION_TOKEN == token1
+
+
+def test_firefox_auto_hook_opens_userscript():
+    """Verify that auto_hook_running_browser for Firefox triggers opening the userscript install URL."""
+    from main import auto_hook_running_browser, _AUTO_HOOK_HIST, arrow_state
+
+    # Reset state
+    _AUTO_HOOK_HIST.pop("firefox", None)
+    arrow_state["last_ping"] = 0.0
+
+    opened_urls = []
+    with unittest.mock.patch("subprocess.Popen") as mock_popen, \
+         unittest.mock.patch("main.find_browser_exe", return_value=r"C:\Program Files\Mozilla Firefox\firefox.exe"), \
+         unittest.mock.patch("os.path.exists", return_value=True), \
+         unittest.mock.patch("sys.platform", "win32"), \
+         unittest.mock.patch.dict(os.environ, {}, clear=False):
+        
+        # Remove PYTEST_CURRENT_TEST check for this specific unit test
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            del os.environ["PYTEST_CURRENT_TEST"]
+        try:
+            detected = {"name": "Mozilla Firefox", "key": "firefox", "hwnd": 0}
+            ret = auto_hook_running_browser(detected)
+            assert ret is True
+            assert mock_popen.called
+            args = mock_popen.call_args[0][0]
+            assert "127.0.0.1:8765/chess-assist.user.js" in args[1]
+        finally:
+            os.environ["PYTEST_CURRENT_TEST"] = "1"
+

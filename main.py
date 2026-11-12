@@ -941,7 +941,7 @@ def auto_hook_running_browser(detected_info: dict) -> bool:
         return False
     b_key = detected_info.get("key", "")
     hwnd = detected_info.get("hwnd", 0)
-    if b_key not in ("chrome", "edge", "brave", "coccoc", "opera", "vivaldi"):
+    if b_key not in ("chrome", "edge", "brave", "coccoc", "opera", "vivaldi", "firefox"):
         return False
     if b_key in _AUTO_HOOK_HIST:
         return False
@@ -965,6 +965,21 @@ def auto_hook_running_browser(detected_info: dict) -> bool:
 
     if not exe_path or not os.path.exists(exe_path):
         exe_path = find_browser_exe(b_key)
+
+    if b_key == "firefox":
+        _AUTO_HOOK_HIST[b_key] = time.time()
+        # For Firefox with Tampermonkey/Violentmonkey installed:
+        # Opening http://127.0.0.1:8765/chess-assist.user.js automatically triggers 1-click install prompt
+        user_script_url = "http://127.0.0.1:8765/chess-assist.user.js"
+        try:
+            if exe_path and os.path.exists(exe_path):
+                subprocess.Popen([exe_path, user_script_url])
+            else:
+                os.startfile(user_script_url)
+            return True
+        except Exception:
+            return False
+
     if not exe_path or not os.path.exists(exe_path):
         return False
 
@@ -1354,9 +1369,14 @@ class StealthOverlayServer(BaseHTTPRequestHandler):
 
         if parsed.path in ("/chess-assist.user.js", "/script.js"):
             token_val = getattr(self, "SESSION_TOKEN", SESSION_TOKEN)
-            content = f"// Chess Stealth Pro Userscript\nconst SESSION_TOKEN = '{token_val}';\n{STEALTH_USERSCRIPT_CODE}".encode("utf-8")
+            if "// ==/UserScript==" in STEALTH_USERSCRIPT_CODE:
+                parts = STEALTH_USERSCRIPT_CODE.split("// ==/UserScript==", 1)
+                script_body = parts[0] + f"// ==/UserScript==\nconst SESSION_TOKEN = '{token_val}';\n" + parts[1]
+            else:
+                script_body = f"const SESSION_TOKEN = '{token_val}';\n" + STEALTH_USERSCRIPT_CODE
+            content = script_body.encode("utf-8")
             self.send_response(200)
-            self.send_header("Content-Type", "application/javascript; charset=utf-8")
+            self.send_header("Content-Type", "text/javascript; charset=utf-8")
             origin = self.headers.get("Origin", "")
             if origin and (origin in self.ALLOWED_ORIGINS or origin.startswith("chrome-extension://") or origin.startswith("moz-extension://")):
                 self.send_header("Access-Control-Allow-Origin", origin)
