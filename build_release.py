@@ -19,7 +19,7 @@ def package_release(tag=None):
     if not tag and len(sys.argv) > 1:
         tag = sys.argv[1].strip()
     if not tag:
-        tag = "v3.2.1"
+        tag = "v3.2.3"
     if not tag.startswith("v"):
         tag = "v" + tag
 

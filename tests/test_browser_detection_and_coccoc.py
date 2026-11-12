@@ -121,3 +121,132 @@ def test_server_origin_auth():
     assert server_handler._check_auth() is False
 
 
+def test_live_move_sync_updates_status_card_without_name_error():
+    """Verify _sync_live_status handles a live move without NameError on PIECE_NAMES_EN."""
+    import time
+    from PySide6.QtWidgets import QApplication
+    import main
+
+    _app = QApplication.instance() or QApplication(sys.argv)
+    snap = dict(main.arrow_state)
+    try:
+        with unittest.mock.patch("main.ensure_overlay_running"), \
+             unittest.mock.patch("main.install_scripts_and_extension"):
+            win = main.ControlCenterWindow(active_key="TEST-KEY", hwid="TEST-HWID")
+            win.status_timer.stop()
+
+        now = time.time()
+        main.arrow_state.update({
+            "enabled": True,
+            "show": True,
+            "move": "e2e4",
+            "piece": "P",
+            "depth": "12",
+            "eval": "+0.4",
+            "last_seen": now,
+            "last_ping": now,
+        })
+        win._last_rendered_sig = None
+
+        with unittest.mock.patch(
+            "main.detect_active_chess_browser",
+            return_value={"key": "min", "name": "Min Browser", "hwnd": 12345},
+        ):
+            win._sync_live_status()
+
+        assert win.status_card.from_sq.text() == "E2"
+        assert win.status_card.to_sq.text() == "E4"
+        assert "White Pawn" in win.status_card.sub_lbl.text()
+        assert "ANALYZING" in win.status_card.status_pill.text()
+    finally:
+        main.arrow_state.clear()
+        main.arrow_state.update(snap)
+
+
+def test_cal_endpoint_uses_imported_qcursor_without_name_error():
+    """Verify QCursor is imported in main and /cal handler calibrates without NameError."""
+    import main
+    assert hasattr(main, "QCursor")
+
+    class DummyPt:
+        def x(self): return 400
+        def y(self): return 300
+
+    class DummyHandler(main.StealthOverlayServer):
+        def __init__(self):
+            self.path = "/cal?cx=300&cy=200&dpr=1&iw=1280&ih=720&wx=0&wy=0"
+            self.headers = {"Origin": "https://www.chess.com"}
+            self.status_code = None
+            self.wfile = __import__("io").BytesIO()
+
+        def send_response(self, code, message=None):
+            self.status_code = code
+
+        def send_header(self, k, v):
+            pass
+
+        def end_headers(self):
+            pass
+
+    handler = DummyHandler()
+    orig_cal = dict(main._CALIBRATED_VP)
+    try:
+        main._CALIBRATED_VP.clear()
+        with unittest.mock.patch.object(main.QCursor, "pos", return_value=DummyPt()), \
+             unittest.mock.patch("main.detect_active_chess_browser", return_value={"key": "min", "name": "Min Browser", "hwnd": 999}), \
+             unittest.mock.patch("main._get_visible_window_rect_qt", return_value=(0.0, 0.0, 1280.0, 760.0, False)), \
+             unittest.mock.patch("main._get_overlay_dpr", return_value=1.0):
+            handler.do_GET()
+
+        assert handler.status_code == 200
+        assert main._CALIBRATED_VP.get("left_qt") == 100.0
+        assert main._CALIBRATED_VP.get("top_qt") == 100.0
+    finally:
+        main._CALIBRATED_VP.clear()
+        main._CALIBRATED_VP.update(orig_cal)
+
+
+def test_frozen_chessstealth_does_not_create_shortcut_to_stale_chesspro(tmp_path):
+    """When frozen ChessStealth.exe runs, shortcuts must never point to stale Desktop/ChessStealthPro/ChessPro.exe."""
+    import main
+
+    fake_installed_exe = str(tmp_path / "Programs" / "ChessStealth" / "ChessStealth.exe")
+    os.makedirs(os.path.dirname(fake_installed_exe), exist_ok=True)
+    with open(fake_installed_exe, "wb") as f:
+        f.write(b"MZ")
+
+    created_targets = []
+    def spy_shortcut(target_path, shortcut_path, icon_path="", work_dir="", desc="", arguments=""):
+        created_targets.append((target_path, shortcut_path))
+        return True
+
+    with unittest.mock.patch.object(main.sys, "frozen", True, create=True), \
+         unittest.mock.patch.object(main.sys, "executable", fake_installed_exe), \
+         unittest.mock.patch("main.create_windows_shortcut", side_effect=spy_shortcut), \
+         unittest.mock.patch.dict(os.environ, {"APPDATA": str(tmp_path)}):
+        main.install_scripts_and_extension()
+
+    for target_path, _ in created_targets:
+        assert not target_path.lower().endswith("chesspro.exe"), f"Stale ChessPro.exe shortcut target: {target_path}"
+
+
+def test_kill_other_app_instances_targets_both_exes():
+    """Verify single-instance cleanup terminates both ChessPro.exe and ChessStealth.exe."""
+    import main
+
+    with unittest.mock.patch("subprocess.run") as mock_run:
+        main._kill_other_app_instances(1111, 2222)
+
+    cmds = [" ".join(c.args[0]) for c in mock_run.call_args_list if c.args]
+    assert any("IMAGENAME eq ChessPro.exe" in cmd for cmd in cmds)
+    assert any("IMAGENAME eq ChessStealth.exe" in cmd for cmd in cmds)
+
+
+def test_overlay_http_server_sets_reuse_address():
+    """Verify overlay HTTP server class sets allow_reuse_address = True."""
+    import main
+    assert getattr(main, "_StealthThreadingHTTPServer", None) is not None
+    assert main._StealthThreadingHTTPServer.allow_reuse_address is True
+
+
+

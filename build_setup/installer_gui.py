@@ -18,7 +18,7 @@ import winreg
 import re
 
 GITHUB_REPO = "nghihi16/chess-stealth-pro"
-APP_VERSION = "3.2.0"
+APP_VERSION = "3.2.3"
 
 def parse_version(tag):
     cleaned = re.sub(r'^[vV]', '', str(tag).strip())

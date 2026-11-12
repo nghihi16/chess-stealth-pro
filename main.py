@@ -31,6 +31,7 @@ from PySide6.QtGui import (
     QAction,
     QBrush,
     QColor,
+    QCursor,
     QFont,
     QIcon,
     QImage,
@@ -102,6 +103,15 @@ GWL_EXSTYLE = -20
 WS_EX_LAYERED = 0x00080000
 WS_EX_TRANSPARENT = 0x00000020
 WS_EX_TOOLWINDOW = 0x00000080
+
+PIECE_NAMES_EN = {
+    "p": "Pawn",
+    "n": "Knight",
+    "b": "Bishop",
+    "r": "Rook",
+    "q": "Queen",
+    "k": "King",
+}
 
 COLOR_PRESETS = {
     "Orange (Classic)": QColor(245, 158, 11, 230),
@@ -531,21 +541,25 @@ def install_scripts_and_extension() -> str:
         if not os.path.exists(app_icon_path):
             app_icon_path = os.path.join(desktop_folder, "app_icon.ico")
 
-        # Main App Shortcut
-        create_windows_shortcut(
-            target_path=os.path.join(desktop_folder, "ChessPro.exe"),
-            shortcut_path=os.path.join(desktop_dir, "Chess Stealth PRO.lnk"),
-            icon_path=f"{app_icon_path},0",
-            work_dir=desktop_folder,
-            desc="Chess Stealth PRO - Universal AI Engine Assist",
-        )
-        create_windows_shortcut(
-            target_path=os.path.join(desktop_folder, "ChessPro.exe"),
-            shortcut_path=os.path.join(desktop_folder, "Chess Stealth PRO.lnk"),
-            icon_path=f"{app_icon_path},0",
-            work_dir=desktop_folder,
-            desc="Chess Stealth PRO - Universal AI Engine Assist",
-        )
+        # Main App Shortcut: always bind to the running executable instead of stale Desktop copies
+        is_frozen = bool(getattr(sys, "frozen", False))
+        running_exe = os.path.abspath(sys.executable) if is_frozen else os.path.join(desktop_folder, "ChessPro.exe")
+        running_name = os.path.basename(running_exe).lower()
+        running_work_dir = os.path.dirname(running_exe)
+
+        for sc_dir in (desktop_dir, desktop_folder):
+            sc_path = os.path.join(sc_dir, "Chess Stealth PRO.lnk")
+            if running_name == "chessstealth.exe" and not os.path.exists(sc_path):
+                continue
+            if not is_frozen and not os.path.exists(running_exe):
+                continue
+            create_windows_shortcut(
+                target_path=running_exe,
+                shortcut_path=sc_path,
+                icon_path=f"{app_icon_path},0",
+                work_dir=running_work_dir,
+                desc="Chess Stealth - Universal AI Engine Assist",
+            )
 
         # Clean up any legacy extra "(Stealth).lnk" shortcuts
         for clean_dir in (desktop_dir, desktop_folder):
@@ -1436,12 +1450,13 @@ class StealthOverlayServer(BaseHTTPRequestHandler):
                     vp_l = float(qpt.x()) - cx * zoom_scale
                     vp_t = float(qpt.y()) - cy * zoom_scale
                     if (vis_t + 25.0) <= vp_t <= (vis_t + 260.0) and (vis_l - 20.0) <= vp_l <= (vis_r - 100.0):
-                        _CALIBRATED_VP = {
+                        _CALIBRATED_VP.clear()
+                        _CALIBRATED_VP.update({
                             "left_qt": vp_l,
                             "top_qt": vp_t,
                             "sig": (hwnd, round(vis_l), round(vis_t), round(vis_w), round(vis_h), round(iw), round(ih)),
                             "ts": time.time(),
-                        }
+                        })
             except Exception:
                 pass
             self._send_cors(200)
@@ -1667,6 +1682,10 @@ class QtStealthOverlay(QWidget):
         painter.drawPolygon(poly)
 
 
+class _StealthThreadingHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = True
+
+
 def ensure_overlay_running(active_key: str, hwid: str):
     global _OVERLAY_INSTANCE
     if _OVERLAY_INSTANCE is not None:
@@ -1679,9 +1698,20 @@ def ensure_overlay_running(active_key: str, hwid: str):
         pass
 
     def run_http():
+        last_err = None
+        for _attempt in range(4):
+            try:
+                srv = _StealthThreadingHTTPServer(("127.0.0.1", 8765), StealthOverlayServer)
+                arrow_state.pop("server_error", None)
+                srv.serve_forever()
+                return
+            except Exception as exc:
+                last_err = exc
+                time.sleep(0.5)
+        arrow_state["server_error"] = str(last_err)
         try:
-            srv = ThreadingHTTPServer(("127.0.0.1", 8765), StealthOverlayServer)
-            srv.serve_forever()
+            with open(os.path.join(APP_DIR, "server_error.log"), "a", encoding="utf-8") as ef:
+                ef.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] HTTP bind failed: {last_err}\n")
         except Exception:
             pass
 
@@ -5269,18 +5299,15 @@ class ActivationWindow(QWidget):
         QTimer.singleShot(60, _do_verify)
 
 
-def main():
-    global _CURRENT_THEME
-    if sys.platform == "win32" and "PYTEST_CURRENT_TEST" not in os.environ:
-        my_pid = os.getpid()
-        parent_pid = os.getppid()
+def _kill_other_app_instances(my_pid: int, parent_pid: int):
+    for exe_name in ("ChessPro.exe", "ChessStealth.exe"):
         try:
             subprocess.run(
                 [
                     "taskkill",
                     "/F",
                     "/FI",
-                    "IMAGENAME eq ChessPro.exe",
+                    f"IMAGENAME eq {exe_name}",
                     "/FI",
                     f"PID ne {my_pid}",
                     "/FI",
@@ -5291,9 +5318,15 @@ def main():
                 creationflags=0x08000000,
                 timeout=3,
             )
-            time.sleep(0.15)
         except Exception:
             pass
+
+
+def main():
+    global _CURRENT_THEME
+    if sys.platform == "win32" and "PYTEST_CURRENT_TEST" not in os.environ:
+        _kill_other_app_instances(os.getpid(), os.getppid())
+        time.sleep(0.15)
 
         try:
             from license_core.watchdog import start_watchdog
