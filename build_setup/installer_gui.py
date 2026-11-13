@@ -18,7 +18,7 @@ import winreg
 import re
 
 GITHUB_REPO = "nghihi16/chess-stealth-pro"
-APP_VERSION = "3.2.3"
+APP_VERSION = "3.2.4"
 
 def parse_version(tag):
     cleaned = re.sub(r'^[vV]', '', str(tag).strip())
@@ -28,16 +28,127 @@ def parse_version(tag):
         parts.append(int(digits[0]) if digits else 0)
     return tuple(parts)
 
+
+def _format_version_tag(ver, fallback=APP_VERSION):
+    cleaned = re.sub(r'^[vV]+', '', str(ver or '').strip())
+    if not cleaned:
+        cleaned = re.sub(r'^[vV]+', '', str(fallback).strip())
+    return f"v{cleaned}"
+
+
+def resolve_installer_update_state(result, installed_version, bundled_version=APP_VERSION, is_update_mode=False):
+    """Decide whether Setup uses bundled payload.zip or GitHub asset without downgrading."""
+    bundled_tag = _format_version_tag(bundled_version)
+    bundled_ver = parse_version(bundled_version)
+    installed_raw = str(installed_version or bundled_version).strip() or bundled_version
+    installed_tag = _format_version_tag(installed_raw, bundled_version)
+    installed_ver = parse_version(installed_raw)
+
+    res = result or {}
+    remote_ok = bool(res.get("available"))
+    remote_ver = res.get("version", (0, 0, 0)) if remote_ok else (0, 0, 0)
+    remote_url = res.get("download_url") if remote_ok else None
+    remote_tag = _format_version_tag(res.get("tag", "")) if (remote_ok and res.get("tag")) else ""
+
+    use_remote = bool(remote_url) and (
+        remote_ver > bundled_ver
+        or (is_update_mode and installed_ver > bundled_ver and remote_ver >= installed_ver)
+    )
+    if use_remote:
+        download_url = remote_url
+        source_ver = remote_ver
+        source_tag = remote_tag or bundled_tag
+        source_label = "available on GitHub"
+        new_version = source_tag
+    else:
+        download_url = None
+        source_ver = bundled_ver
+        source_tag = bundled_tag
+        source_label = "ready to install"
+        new_version = bundled_version
+
+    if not is_update_mode:
+        return {
+            "download_url": download_url,
+            "new_version": new_version,
+            "badge_text": "",
+            "highlight": False,
+            "btn_text": "Get Started",
+        }
+
+    if source_ver > installed_ver:
+        return {
+            "download_url": download_url,
+            "new_version": new_version,
+            "badge_text": f"✦ New version {source_tag} {source_label}",
+            "highlight": True,
+            "btn_text": f"Update to {source_tag}",
+        }
+
+    badge_text = (
+        f"✓ Chess Stealth {installed_tag} is up to date"
+        if (remote_ok or bundled_ver >= installed_ver)
+        else f"Installed: {installed_tag}"
+    )
+    return {
+        "download_url": download_url,
+        "new_version": installed_tag if (not use_remote and installed_ver > bundled_ver) else new_version,
+        "badge_text": badge_text,
+        "highlight": False,
+        "btn_text": "Reinstall / Repair",
+    }
+
 def kill_running_process(process_name="ChessStealth.exe"):
     try:
         subprocess.run(
-            ["taskkill", "/f", "/im", process_name],
+            ["taskkill", "/f", "/t", "/im", process_name],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             creationflags=0x08000000,
-            check=False
+            timeout=5,
+            check=False,
         )
-        time.sleep(0.2)
+        deadline = time.time() + 3.0
+        while time.time() < deadline:
+            probe = subprocess.run(
+                ["tasklist", "/fi", f"IMAGENAME eq {process_name}", "/nh"],
+                capture_output=True,
+                text=True,
+                creationflags=0x08000000,
+                timeout=3,
+                check=False,
+            )
+            running = any(
+                line.strip().lower().startswith(process_name.lower())
+                for line in (probe.stdout or "").splitlines()
+            )
+            if not running:
+                break
+            time.sleep(0.15)
+        time.sleep(0.25)
     except Exception:
         pass
+
+
+def _extract_member_with_retry(zf, item, target_dir, retries=12, delay_sec=0.35):
+    """Extract a zip member, retrying if Windows still holds a transient handle on an exiting EXE."""
+    name = getattr(item, "filename", item)
+    dest = os.path.join(target_dir, name)
+    for attempt in range(retries):
+        try:
+            return zf.extract(item, target_dir)
+        except PermissionError:
+            if attempt == retries - 1:
+                if os.path.isfile(dest):
+                    try:
+                        stale = f"{dest}.old_{int(time.time() * 1000)}"
+                        os.replace(dest, stale)
+                        return zf.extract(item, target_dir)
+                    except OSError:
+                        pass
+                raise
+            if delay_sec > 0:
+                time.sleep(delay_sec)
 
 def get_installed_info():
     try:
@@ -720,6 +831,7 @@ class InstallWorker(QThread):
         try:
             self.progress.emit(3, "Closing active Chess Stealth instances...")
             kill_running_process("ChessStealth.exe")
+            kill_running_process("ChessPro.exe")
             os.makedirs(self.target_dir, exist_ok=True)
             time.sleep(0.1)
 
@@ -760,7 +872,7 @@ class InstallWorker(QThread):
                 all_files = zf.infolist()
                 total_files = len(all_files)
                 for idx, item in enumerate(all_files, start=1):
-                    zf.extract(item, self.target_dir)
+                    _extract_member_with_retry(zf, item, self.target_dir)
                     percent = 52 + int((idx / total_files) * 42)
                     fname = os.path.basename(item.filename)
                     if fname:
@@ -1310,41 +1422,44 @@ class SetupWizardWindow(QWidget):
         self.worker.start()
 
     def on_github_checked(self, result):
-        if not result.get("available"):
-            if self.is_update_mode:
-                curr_v = self.installed_info.get("version", APP_VERSION)
-                self.update_badge_lbl.setText(f"Installed: v{curr_v}")
-                self.update_badge_lbl.show()
-            return
+        decision = resolve_installer_update_state(
+            result,
+            installed_version=self.installed_info.get("version", APP_VERSION),
+            bundled_version=APP_VERSION,
+            is_update_mode=self.is_update_mode,
+        )
+        self.download_url = decision["download_url"]
+        self.new_version = decision["new_version"]
 
-        tag = result.get("tag", "")
-        self.download_url = result.get("download_url")
-        remote_ver = result.get("version", (0, 0, 0))
-        installed_ver = parse_version(self.installed_info.get("version", APP_VERSION))
-        self.new_version = tag
-
-        if remote_ver > installed_ver:
-            self.update_badge_lbl.setText(f"✦ New version {tag} available on GitHub")
-            self.update_badge_lbl.setStyleSheet("""
-                font-size: 11px;
-                font-weight: 600;
-                color: #ffffff;
-                padding: 4px 12px;
-                background: rgba(255, 255, 255, 0.12);
-                border: 1px solid rgba(255, 255, 255, 0.25);
-                border-radius: 10px;
-            """)
+        if decision["badge_text"]:
+            self.update_badge_lbl.setText(decision["badge_text"])
+            if decision["highlight"]:
+                self.update_badge_lbl.setStyleSheet("""
+                    font-size: 11px;
+                    font-weight: 600;
+                    color: #ffffff;
+                    padding: 4px 12px;
+                    background: rgba(255, 255, 255, 0.12);
+                    border: 1px solid rgba(255, 255, 255, 0.25);
+                    border-radius: 10px;
+                """)
+            else:
+                self.update_badge_lbl.setStyleSheet("""
+                    font-size: 11px;
+                    font-weight: 600;
+                    color: #a1a1aa;
+                    padding: 4px 14px;
+                    background: rgba(255, 255, 255, 0.05);
+                    border: 1px solid rgba(255, 255, 255, 0.12);
+                    border-radius: 10px;
+                """)
             self.update_badge_lbl.show()
-            self.start_btn.setText(f"Update to {tag}")
-            self.start_btn.setMinimumWidth(180)
+
+        if self.is_update_mode:
+            self.start_btn.setText(decision["btn_text"])
+            if decision["highlight"]:
+                self.start_btn.setMinimumWidth(180)
             self.custom_opt_btn.show()
-            self.is_update_mode = True
-        else:
-            if self.is_update_mode:
-                self.update_badge_lbl.setText(f"✓ Chess Stealth {tag} is up to date")
-                self.update_badge_lbl.show()
-                self.start_btn.setText("Reinstall / Repair")
-                self.custom_opt_btn.show()
 
     def start_installation(self):
         self.install_title_lbl.setText("Installing Chess Stealth...")

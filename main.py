@@ -16,6 +16,7 @@ import urllib.parse
 from PySide6.QtCore import (
     QByteArray,
     QEasingCurve,
+    QMetaObject,
     QParallelAnimationGroup,
     QPoint,
     QPointF,
@@ -27,6 +28,7 @@ from PySide6.QtCore import (
     QTimer,
     Signal,
 )
+from vision_core.vision_runner import VisionRunner
 from PySide6.QtGui import (
     QAction,
     QBrush,
@@ -143,6 +145,42 @@ arrow_state = {
 _ACTIVE_WINDOWS = []
 _CURRENT_THEME = "dark"
 _OVERLAY_INSTANCE = None
+_VISION_RUNNER: VisionRunner | None = None
+
+
+def _request_overlay_repaint():
+    overlay = _OVERLAY_INSTANCE
+    if overlay is not None:
+        try:
+            QMetaObject.invokeMethod(overlay, "update", Qt.ConnectionType.QueuedConnection)
+        except Exception:
+            pass
+
+
+def ensure_vision_runner_running():
+    global _VISION_RUNNER
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return None
+    if _VISION_RUNNER is None:
+        _VISION_RUNNER = VisionRunner(
+            arrow_state=arrow_state,
+            browser_detect_fn=detect_active_chess_browser,
+            dpr_fn=_get_overlay_dpr,
+            on_repaint=_request_overlay_repaint,
+        )
+    _VISION_RUNNER.start()
+    return _VISION_RUNNER
+
+
+def stop_vision_runner():
+    global _VISION_RUNNER
+    runner = _VISION_RUNNER
+    _VISION_RUNNER = None
+    if runner is not None:
+        try:
+            runner.stop()
+        except Exception:
+            pass
 
 # ================= 100% PURE ZERO-DOM STEALTH SCRIPT (ZERO IN-PAGE ELEMENTS) =================
 # CHỐNG ANTI-CHEAT TUYỆT ĐỐI: Không chèn bất kỳ thẻ HTML, SVG hay CSS nào vào DOM của Chess.com.
@@ -571,9 +609,7 @@ def install_scripts_and_extension() -> str:
                         except Exception:
                             pass
 
-        # Automatically hook user's existing normal browser shortcuts (Desktop, Taskbar, Start Menu)
-        # so opening their normal browser automatically loads the Stealth extension on their default profile
-        hook_user_browser_shortcuts(ext_dir)
+        # Native Screen-Vision handles any browser out of the box without mutating user shortcuts
         register_firefox_policy(ext_dir)
     except Exception:
         pass
@@ -951,14 +987,190 @@ def launch_browser_for_chess(browser_type: str = "auto"):
 
 _AUTO_HOOK_HIST: dict[str, float] = {}
 _CALIBRATED_VP: dict = {"left_qt": None, "top_qt": None, "sig": None, "ts": 0.0}
+_USERSCRIPT_MANAGER_EXT_IDS = (
+    "dhdgffkkebhmkfjojejmpbldmpobfkfo",  # Tampermonkey
+    "gcalenpjmijncebpfijmoaglllgpjagf",  # Tampermonkey Beta
+    "jinjaccalgkegednnccohejagnlnfdag",  # Violentmonkey
+    "ndcooeababalnlpkfedmmbbbgkljhpjf",  # ScriptCat
+)
+
+
+def _get_pe_major_version(exe_path: str) -> int:
+    """Return PE product major version on Windows, or 0 if unavailable."""
+    if sys.platform != "win32" or not exe_path or not os.path.exists(exe_path):
+        return 0
+    try:
+        ver = ctypes.windll.version
+        dummy = wintypes.DWORD(0)
+        size = ver.GetFileVersionInfoSizeW(exe_path, ctypes.byref(dummy))
+        if not size:
+            return 0
+        buf = ctypes.create_string_buffer(size)
+        if not ver.GetFileVersionInfoW(exe_path, 0, size, buf):
+            return 0
+        p_info = ctypes.c_void_p()
+        l_info = wintypes.UINT(0)
+        if not ver.VerQueryValueW(buf, "\\", ctypes.byref(p_info), ctypes.byref(l_info)):
+            return 0
+
+        class _VS_FIXEDFILEINFO(ctypes.Structure):
+            _fields_ = [
+                ("dwSignature", wintypes.DWORD), ("dwStrucVersion", wintypes.DWORD),
+                ("dwFileVersionMS", wintypes.DWORD), ("dwFileVersionLS", wintypes.DWORD),
+                ("dwProductVersionMS", wintypes.DWORD), ("dwProductVersionLS", wintypes.DWORD),
+                ("dwFileFlagsMask", wintypes.DWORD), ("dwFileFlags", wintypes.DWORD),
+                ("dwFileOS", wintypes.DWORD), ("dwFileType", wintypes.DWORD),
+                ("dwFileSubtype", wintypes.DWORD), ("dwFileDateMS", wintypes.DWORD),
+                ("dwFileDateLS", wintypes.DWORD),
+            ]
+
+        ffi = ctypes.cast(p_info, ctypes.POINTER(_VS_FIXEDFILEINFO)).contents
+        return (ffi.dwProductVersionMS >> 16) & 0xFFFF
+    except Exception:
+        return 0
+
+
+def _get_process_cmdline(pid: int) -> str:
+    """Read a same-user Windows process command line via NtQueryInformationProcess."""
+    if sys.platform != "win32" or not pid:
+        return ""
+    k32 = ctypes.windll.kernel32
+    nt = ctypes.windll.ntdll
+    h_proc = k32.OpenProcess(0x1000, False, int(pid))
+    if not h_proc:
+        return ""
+    try:
+        class _UNICODE_STRING(ctypes.Structure):
+            _fields_ = [("Length", wintypes.USHORT), ("MaximumLength", wintypes.USHORT), ("Buffer", wintypes.LPWSTR)]
+
+        sz = wintypes.ULONG(4096)
+        buf = ctypes.create_string_buffer(sz.value)
+        ret_len = wintypes.ULONG(0)
+        st = nt.NtQueryInformationProcess(h_proc, 60, buf, sz, ctypes.byref(ret_len))
+        if st != 0 and ret_len.value > sz.value:
+            buf = ctypes.create_string_buffer(ret_len.value)
+            st = nt.NtQueryInformationProcess(h_proc, 60, buf, ret_len.value, ctypes.byref(ret_len))
+        if st == 0:
+            us = ctypes.cast(buf, ctypes.POINTER(_UNICODE_STRING)).contents
+            return us.Buffer[: us.Length // 2] if us.Buffer else ""
+    except Exception:
+        pass
+    finally:
+        k32.CloseHandle(h_proc)
+    return ""
+
+
+def _list_pids_by_exe_name(exe_name: str) -> list[int]:
+    """List running Windows process IDs whose image filename matches exe_name."""
+    if sys.platform != "win32" or not exe_name:
+        return []
+    target = os.path.basename(exe_name).lower()
+    pids: list[int] = []
+    k32 = ctypes.windll.kernel32
+    snap = k32.CreateToolhelp32Snapshot(0x2, 0)
+    if not snap or snap == ctypes.c_void_p(-1).value:
+        return pids
+    try:
+        class _PROCESSENTRY32W(ctypes.Structure):
+            _fields_ = [
+                ("dwSize", wintypes.DWORD),
+                ("cntUsage", wintypes.DWORD),
+                ("th32ProcessID", wintypes.DWORD),
+                ("th32DefaultHeapID", ctypes.c_size_t),
+                ("th32ModuleID", wintypes.DWORD),
+                ("cntThreads", wintypes.DWORD),
+                ("th32ParentProcessID", wintypes.DWORD),
+                ("pcPriClassBase", ctypes.c_long),
+                ("dwFlags", wintypes.DWORD),
+                ("szExeFile", wintypes.WCHAR * 260),
+            ]
+
+        pe = _PROCESSENTRY32W()
+        pe.dwSize = ctypes.sizeof(_PROCESSENTRY32W)
+        if k32.Process32FirstW(snap, ctypes.byref(pe)):
+            while True:
+                if str(pe.szExeFile).lower() == target:
+                    pids.append(int(pe.th32ProcessID))
+                if not k32.Process32NextW(snap, ctypes.byref(pe)):
+                    break
+    except Exception:
+        pass
+    finally:
+        k32.CloseHandle(snap)
+    return pids
+
+
+def _is_browser_already_hooked(hwnd: int = 0, exe_path: str | None = None) -> bool:
+    """Return True if the active browser window or matching browser process already has --load-extension=."""
+    if sys.platform != "win32":
+        return False
+    checked: set[int] = set()
+    if hwnd:
+        pid = wintypes.DWORD()
+        ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if pid.value:
+            checked.add(int(pid.value))
+            if "--load-extension=" in _get_process_cmdline(int(pid.value)).lower():
+                return True
+    if exe_path:
+        for pid in _list_pids_by_exe_name(os.path.basename(exe_path)):
+            if pid not in checked and "--load-extension=" in _get_process_cmdline(pid).lower():
+                return True
+    return False
+
+
+def _chrome_userscript_manager_installed() -> bool:
+    """Return True if Google Chrome has Tampermonkey, Violentmonkey, or ScriptCat installed."""
+    user_data = os.path.join(os.getenv("LOCALAPPDATA", ""), "Google", "Chrome", "User Data")
+    if not os.path.isdir(user_data):
+        return False
+    try:
+        for entry in os.listdir(user_data):
+            if entry == "Default" or entry.startswith("Profile "):
+                ext_root = os.path.join(user_data, entry, "Extensions")
+                for ext_id in _USERSCRIPT_MANAGER_EXT_IDS:
+                    if os.path.isdir(os.path.join(ext_root, ext_id)):
+                        return True
+    except Exception:
+        pass
+    return False
+
+
+def _close_browser_windows_gracefully(exe_name: str, hwnd: int = 0):
+    user32 = ctypes.windll.user32
+    if hwnd and user32.IsWindow(hwnd):
+        user32.PostMessageW(hwnd, 0x0010, 0, 0)
+    target_pids = set(_list_pids_by_exe_name(exe_name))
+    if not target_pids:
+        return
+    WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    def _enum_close(h, _):
+        if h != hwnd and user32.IsWindowVisible(h):
+            pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(h, ctypes.byref(pid))
+            if int(pid.value) in target_pids:
+                user32.PostMessageW(h, 0x0010, 0, 0)
+        return True
+
+    user32.EnumWindows(WNDENUMPROC(_enum_close), 0)
+
+
+def _wait_for_process_exit(exe_name: str, timeout: float = 3.5) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if not _list_pids_by_exe_name(exe_name):
+            return True
+        time.sleep(0.15)
+    return not _list_pids_by_exe_name(exe_name)
 
 
 def auto_hook_running_browser(detected_info: dict) -> bool:
     """
-    If the user opened a Chromium browser (Brave, Chrome, Edge, Opera, Cốc Cốc) on Chess.com
-    before its shortcut was hooked, seamlessly reloads the browser session in-place with
-    --restore-last-session --load-extension="<ext_dir>" on the user's normal default profile.
-    Never restarts a browser that already has --load-extension or has already connected.
+    If the user opened a supported Chromium browser (Brave, Edge, Opera, Cốc Cốc, or Chrome < 137)
+    before its shortcut was hooked, cleanly reload its session with --load-extension="<ext_dir>".
+    Never restarts a browser that already has --load-extension, already connected, or is Chrome 137+
+    (which removed --load-extension support).
     """
     if sys.platform != "win32" or "PYTEST_CURRENT_TEST" in os.environ:
         return False
@@ -995,8 +1207,6 @@ def auto_hook_running_browser(detected_info: dict) -> bool:
 
     if b_key == "firefox":
         _AUTO_HOOK_HIST[b_key] = time.time()
-        # For Firefox with Tampermonkey/Violentmonkey installed:
-        # Opening http://127.0.0.1:8765/chess-assist.user.js automatically triggers 1-click install prompt
         user_script_url = "http://127.0.0.1:8765/chess-assist.user.js"
         try:
             if exe_path and os.path.exists(exe_path):
@@ -1010,6 +1220,23 @@ def auto_hook_running_browser(detected_info: dict) -> bool:
     if not exe_path or not os.path.exists(exe_path):
         return False
 
+    if _is_browser_already_hooked(hwnd, exe_path):
+        _AUTO_HOOK_HIST[b_key] = time.time()
+        return False
+
+    if b_key == "chrome":
+        if _chrome_userscript_manager_installed():
+            _AUTO_HOOK_HIST[b_key] = time.time()
+            try:
+                subprocess.Popen([exe_path, "http://127.0.0.1:8765/chess-assist.user.js"])
+                return True
+            except Exception:
+                return False
+        major = _get_pe_major_version(exe_path)
+        if major == 0 or major >= 137:
+            _AUTO_HOOK_HIST[b_key] = time.time()
+            return False
+
     _AUTO_HOOK_HIST[b_key] = time.time()
     ext_dir = os.path.join(APP_DIR, "browser-extension")
     if not os.path.exists(os.path.join(ext_dir, "manifest.json")):
@@ -1018,21 +1245,22 @@ def auto_hook_running_browser(detected_info: dict) -> bool:
     def _reload_worker():
         try:
             exe_name = os.path.basename(exe_path)
-            if arrow_state.get("last_ping", 0.0) > 0.0:
+            if arrow_state.get("last_ping", 0.0) > 0.0 or _is_browser_already_hooked(hwnd, exe_path):
                 return
 
-            user32 = ctypes.windll.user32
-            if hwnd and user32.IsWindow(hwnd):
-                user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE for clean session save
-            time.sleep(0.4)
-            subprocess.run(
-                ["taskkill", "/F", "/IM", exe_name],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=0x08000000,
-                timeout=4,
-            )
-            time.sleep(0.3)
+            _close_browser_windows_gracefully(exe_name, hwnd)
+            if not _wait_for_process_exit(exe_name, timeout=3.5):
+                subprocess.run(
+                    ["taskkill", "/F", "/IM", exe_name],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=0x08000000,
+                    timeout=4,
+                )
+                time.sleep(0.3)
+
+            if arrow_state.get("last_ping", 0.0) > 0.0:
+                return
             subprocess.Popen(
                 [
                     exe_path,
@@ -2500,7 +2728,7 @@ class LuxuryStatusCard(QFrame):
         self.sub_lbl.setText(f"{piece} • Recommended Move")
         self._refresh_styles()
 
-    def show_waiting(self, is_connected: bool = True, browser_name: str | None = None, was_closed: bool = False):
+    def show_waiting(self, is_connected: bool = True, browser_name: str | None = None, was_closed: bool = False, detail: str | None = None):
         self.from_sq.hide()
         self.arrow_sym.hide()
         self.to_sq.hide()
@@ -2514,12 +2742,12 @@ class LuxuryStatusCard(QFrame):
             self.status_pill.setText(b_label)
             self.status_pill.setProperty("state", "connected")
             self.meta_lbl.setText(f"{browser_name} • Ready" if browser_name else "Chess.com Engine")
-            self.sub_lbl.setText("Connected to Chess.com • Start game to analyze moves")
+            self.sub_lbl.setText(detail or "Connected to Chess.com • Start game to analyze moves")
         elif browser_name:
             self.status_pill.setText(f"●  DETECTED ({browser_name.upper()})")
             self.status_pill.setProperty("state", "detected")
             self.meta_lbl.setText("Chess.com")
-            self.sub_lbl.setText("Detected")
+            self.sub_lbl.setText(detail or "Detected")
         elif was_closed:
             self.status_pill.setText("●  WAITING FOR BROWSER")
             self.status_pill.setProperty("state", "waiting")
@@ -4149,6 +4377,7 @@ class ControlCenterWindow(QWidget):
         self._theme_shortcut.activated.connect(self._toggle_theme)
 
         ensure_overlay_running(active_key, hwid)
+        ensure_vision_runner_running()
         install_scripts_and_extension()
 
         self._build_ui()
@@ -4222,6 +4451,7 @@ class ControlCenterWindow(QWidget):
         if hasattr(self, "status_timer") and self.status_timer.isActive():
             self.status_timer.stop()
         if not getattr(self, "_logging_out", False):
+            stop_vision_runner()
             app = QApplication.instance()
             if app:
                 app.quit()
@@ -4469,7 +4699,11 @@ class ControlCenterWindow(QWidget):
 
     def _sync_live_status(self):
         now = time.time()
-        is_connected = (now - arrow_state.get("last_ping", 0.0) <= 4.0)
+        vision_connected = bool(
+            arrow_state.get("vision_active", False)
+            and (now - arrow_state.get("last_seen", 0.0) <= 4.0)
+        )
+        is_connected = (now - arrow_state.get("last_ping", 0.0) <= 4.0) or vision_connected
 
         detected = detect_active_chess_browser()
         if detected:
@@ -4490,14 +4724,18 @@ class ControlCenterWindow(QWidget):
             and (b_name is not None)
         )
 
-        if arrow_state.get("enabled", True) and not effective_connected and arrow_state.get("last_ping", 0.0) == 0.0 and detected:
-            if getattr(self, "_unconnected_detect_since", None) is None:
-                self._unconnected_detect_since = now
-            elif now - self._unconnected_detect_since >= 3.5:
-                self._unconnected_detect_since = now
-                auto_hook_running_browser(detected)
-        else:
-            self._unconnected_detect_since = None
+        detected_detail = None
+        if arrow_state.get("enabled", True) and not is_showing_move and b_name:
+            v_status = arrow_state.get("vision_status", "")
+            if effective_connected and arrow_state.get("vision_active"):
+                if v_status == "need_start_pos":
+                    detected_detail = "Start New Game (Move 1) to lock pieces"
+                elif v_status == "opponent_turn":
+                    detected_detail = f"Native Vision ({b_name}) • Waiting turn"
+                else:
+                    detected_detail = f"Native Vision ({b_name}) • Analyzing..."
+            elif not effective_connected and arrow_state.get("last_ping", 0.0) == 0.0:
+                detected_detail = f"Native Vision Ready ({b_name}) • Open board"
 
         current_sig = (
             arrow_state.get("enabled", True),
@@ -4510,6 +4748,7 @@ class ControlCenterWindow(QWidget):
             effective_connected,
             b_name,
             was_closed,
+            detected_detail,
             _CURRENT_THEME,
         )
         if self._last_rendered_sig == current_sig:
@@ -4536,7 +4775,12 @@ class ControlCenterWindow(QWidget):
             self.action_btn.setObjectName("MainActionBtnDeactivate")
             self.action_btn.setText("DEACTIVATE")
         else:
-            self.status_card.show_waiting(is_connected=effective_connected, browser_name=b_name, was_closed=was_closed)
+            self.status_card.show_waiting(
+                is_connected=effective_connected,
+                browser_name=b_name,
+                was_closed=was_closed,
+                detail=detected_detail,
+            )
             self.action_btn.setObjectName("MainActionBtnDeactivate")
             self.action_btn.setText("DEACTIVATE")
 
@@ -5432,6 +5676,7 @@ def main():
 
         QTimer.singleShot(120, _launch_next)
 
+    app.aboutToQuit.connect(stop_vision_runner)
     QTimer.singleShot(20, step1_engine)
     app.exec()
 
