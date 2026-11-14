@@ -966,6 +966,8 @@ def launch_browser_for_chess(browser_type: str = "auto"):
                     exe_path,
                     f"--user-data-dir={profile_dir}",
                     f"--load-extension={ext_dir}",
+                    "--remote-debugging-port=9229",
+                    "--remote-allow-origins=*",
                     "--no-first-run",
                     "--no-default-browser-check",
                     chess_url,
@@ -2410,6 +2412,32 @@ def _build_qss(theme: str) -> str:
         QPushButton#MainActionBtnActivate:hover {{
             background-color: #F4F4F5;
         }}
+        QPushButton#SidePillBtn {{
+            background-color: #141824;
+            color: #CBD5E1;
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 8px;
+            font-family: -apple-system, "Segoe UI", sans-serif;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.4px;
+            padding: 6px 8px;
+        }}
+        QPushButton#SidePillBtn:hover {{
+            background-color: #1D2333;
+            color: #F8FAFC;
+            border-color: rgba(255, 255, 255, 0.30);
+        }}
+        QPushButton#SidePillBtn[active="true"] {{
+            background-color: #FFFFFF;
+            color: #090B10;
+            border: 1px solid #FFFFFF;
+        }}
+        QPushButton#SidePillBtn[active="true"]:hover {{
+            background-color: #E2E8F0;
+            border-color: #E2E8F0;
+            color: #090B10;
+        }}
         """
     else:
         return f"""
@@ -2651,6 +2679,32 @@ def _build_qss(theme: str) -> str:
         }}
         QPushButton#MainActionBtnActivate:hover {{
             background-color: #27272A;
+        }}
+        QPushButton#SidePillBtn {{
+            background-color: #F4F4F5;
+            color: #3F3F46;
+            border: 1px solid #D4D4D8;
+            border-radius: 8px;
+            font-family: -apple-system, "Segoe UI", sans-serif;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.4px;
+            padding: 6px 8px;
+        }}
+        QPushButton#SidePillBtn:hover {{
+            background-color: #E4E4E7;
+            color: #090B10;
+            border-color: #A1A1AA;
+        }}
+        QPushButton#SidePillBtn[active="true"] {{
+            background-color: #090B10;
+            color: #FFFFFF;
+            border: 1px solid #090B10;
+        }}
+        QPushButton#SidePillBtn[active="true"]:hover {{
+            background-color: #27272A;
+            border-color: #27272A;
+            color: #FFFFFF;
         }}
         """
 
@@ -4432,6 +4486,8 @@ class ControlCenterWindow(QWidget):
 
         self._theme_shortcut = QShortcut(QKeySequence("Ctrl+T"), self)
         self._theme_shortcut.activated.connect(self._toggle_theme)
+        self._side_shortcut = QShortcut(QKeySequence("Alt+S"), self)
+        self._side_shortcut.activated.connect(self._cycle_side_lock)
 
         ensure_overlay_running(active_key, hwid)
         ensure_vision_runner_running()
@@ -4673,6 +4729,31 @@ class ControlCenterWindow(QWidget):
         arr_sec.addLayout(arr_row)
         root.addLayout(arr_sec)
 
+        # 4b. Side Orientation Lock Section (AUTO / WHITE / BLACK, Alt+S cycles)
+        side_sec = QVBoxLayout()
+        side_sec.setSpacing(6)
+        lbl_side = QLabel("PLAY AS")
+        lbl_side.setObjectName("SectionHeader")
+        side_sec.addWidget(lbl_side)
+
+        side_row = QHBoxLayout()
+        side_row.setSpacing(8)
+        self.side_buttons: dict[str, QPushButton] = {}
+        self.side_Buttons = self.side_buttons
+        cur_side = str(arrow_state.get("side", "auto") or "auto").lower()
+        for key, caption in (("auto", "AUTO"), ("w", "WHITE"), ("b", "BLACK")):
+            btn = QPushButton(caption)
+            btn.setObjectName("SidePillBtn")
+            btn.setMinimumHeight(32)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setToolTip(f"Lock orientation ({caption}) • Shortcut Alt+S")
+            btn.setProperty("active", "true" if cur_side == key else "false")
+            btn.clicked.connect(lambda _checked=False, s=key: self._on_side_changed(s))
+            side_row.addWidget(btn, 1)
+            self.side_buttons[key] = btn
+        side_sec.addLayout(side_row)
+        root.addLayout(side_sec)
+
         # 5. Bottom Action Button: DEACTIVATE when running, ACTIVATE when paused
         self.action_btn = QPushButton("DEACTIVATE" if arrow_state["enabled"] else "ACTIVATE")
         self.action_btn.setObjectName("MainActionBtnDeactivate" if arrow_state["enabled"] else "MainActionBtnActivate")
@@ -4705,8 +4786,27 @@ class ControlCenterWindow(QWidget):
                 sw.set_active(name == color_name)
             self._on_rgb_color_picked(COLOR_PRESETS[color_name])
 
+    def _refresh_side_buttons(self):
+        cur_side = str(arrow_state.get("side", "auto") or "auto").lower()
+        for key, btn in getattr(self, "side_buttons", {}).items():
+            btn.setProperty("active", "true" if key == cur_side else "false")
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+            btn.update()
+
+    def _cycle_side_lock(self):
+        order = ("auto", "w", "b")
+        cur = str(arrow_state.get("side", "auto") or "auto").lower()
+        nxt = order[(order.index(cur) + 1) % len(order)] if cur in order else "auto"
+        self._on_side_changed(nxt)
+
     def _on_side_changed(self, side: str):
-        arrow_state["side"] = side
+        norm = side if side in ("auto", "w", "b") else "auto"
+        arrow_state["side"] = norm
+        self._refresh_side_buttons()
+        self._last_rendered_sig = None
+        if hasattr(self, "status_card"):
+            self._sync_live_status()
 
     def _toggle_theme(self):
         global _CURRENT_THEME
@@ -4796,12 +4896,14 @@ class ControlCenterWindow(QWidget):
         if arrow_state.get("enabled", True) and not is_showing_move and b_name:
             v_status = arrow_state.get("vision_status", "")
             if effective_connected and arrow_state.get("vision_active"):
+                side_txt = "Playing Black" if arrow_state.get("flipped") else "Playing White"
+                mode_lbl = "Direct DOM" if arrow_state.get("cdp_active") else "Native Vision"
                 if v_status == "need_start_pos":
                     detected_detail = "Start New Game (Move 1) to lock pieces"
                 elif v_status == "opponent_turn":
-                    detected_detail = f"Native Vision ({b_name}) • Waiting turn"
+                    detected_detail = f"{mode_lbl} ({b_name}) • {side_txt} • Waiting turn"
                 else:
-                    detected_detail = f"Native Vision ({b_name}) • Analyzing..."
+                    detected_detail = f"{mode_lbl} ({b_name}) • {side_txt} • Analyzing..."
             elif not effective_connected and arrow_state.get("last_ping", 0.0) == 0.0:
                 detected_detail = f"Native Vision Ready ({b_name}) • Open board"
 

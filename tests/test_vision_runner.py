@@ -326,3 +326,106 @@ def test_vision_runner_ignores_non_final_intermediate_engine_updates():
     assert arrow_final["show"] is True
     assert arrow_final["move"] == "e2e4"
 
+
+
+def test_legality_gate_blocks_friendly_capture_and_blocked_ray():
+    from tests.test_board_detector import _render_synthetic_frame
+    from vision_core.chess_rules import START_FEN, ChessBoardState
+
+    state0 = ChessBoardState.starting_position()
+    frame0 = _render_synthetic_frame(state0)
+
+    class _NoopEngine:
+        def analyze(self, *args, **kwargs):
+            return 1
+
+        def stop_search(self):
+            pass
+
+        def shutdown(self):
+            pass
+
+    st = _fresh_arrow_state()
+    runner = VisionRunner(
+        arrow_state=st,
+        engine=_NoopEngine(),
+        capture_fn=lambda _roi=None: frame0,
+        browser_detect_fn=lambda: {"name": "Google Chrome", "key": "chrome", "hwnd": 1},
+    )
+    runner.step_once()
+    assert runner._active_board_key
+
+    # 1. Self-capture onto friendly occupied d2 must be blocked
+    runner._on_engine_update(
+        {"board_key": runner._active_board_key, "fen": START_FEN, "move": "d1d2", "final": True}
+    )
+    assert st["show"] is False
+
+    # 2. Sliding Queen ray passing through occupied d2 (d1 -> d4) must be blocked
+    runner._on_engine_update(
+        {"board_key": runner._active_board_key, "fen": START_FEN, "move": "d1d4", "final": True}
+    )
+    assert st["show"] is False
+
+    # 3. Valid empty-ray opening move e2e4 must be allowed
+    runner._on_engine_update(
+        {"board_key": runner._active_board_key, "fen": START_FEN, "move": "e2e4", "final": True}
+    )
+    assert st["show"] is True
+    assert st["move"] == "e2e4"
+
+
+def test_cdp_browser_reader_overrides_vision_and_sets_cdp_active():
+    from vision_core.chess_rules import ChessBoardState
+
+    s1 = ChessBoardState.starting_position().push_uci("e2e4")
+    fen_after_e4 = s1.to_fen()
+    seen_fens: list[str] = []
+
+    class _FakeCdpReader:
+        def read_board(self):
+            return {
+                "fen": fen_after_e4,
+                "turn": "b",
+                "flipped": True,
+                "mySide": "b",
+                "board": {"x": 240, "y": 100, "width": 600, "height": 600},
+            }
+
+    class _SpyEngine:
+        def analyze(self, fen, depth=12, board_key="", skill=20, on_update=None):
+            seen_fens.append(fen)
+            if on_update is not None:
+                on_update({
+                    "board_key": board_key,
+                    "fen": fen,
+                    "move": "e7e5",
+                    "depth": str(depth),
+                    "eval": "+0.2",
+                    "final": True,
+                })
+            return 1
+
+        def stop_search(self):
+            pass
+
+        def shutdown(self):
+            pass
+
+    st = _fresh_arrow_state()
+    st["side"] = "auto"
+    runner = VisionRunner(
+        arrow_state=st,
+        engine=_SpyEngine(),
+        capture_fn=lambda _roi=None: None,
+        browser_detect_fn=lambda: {"name": "Google Chrome", "key": "chrome", "hwnd": 1},
+        browser_reader=_FakeCdpReader(),
+    )
+    runner.step_once()
+    assert st["cdp_active"] is True
+    assert st["flipped"] is True
+    assert seen_fens == [fen_after_e4]
+    assert st["show"] is True
+    assert st["move"] == "e7e5"
+    assert runner._is_move_physically_plausible("e7e5", "p", "b") is True
+    assert runner._is_move_physically_plausible("e7e8", "p", "b") is False

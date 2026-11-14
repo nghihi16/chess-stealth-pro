@@ -462,3 +462,58 @@ def test_queen_vs_knight_disambiguation_and_swap_self_repair():
     assert rec.board.count("N") <= 2
 
 
+
+
+def test_opening_auto_calibration_joining_as_black_after_1e4():
+    import time
+    s1 = ChessBoardState.starting_position().push_uci("e2e4")
+    img1 = _render_synthetic_frame(s1, flipped=True)
+    det = BoardDetector()
+    res = det.process_frame(img1, side_pref="auto")
+    assert res.status == "ok"
+    assert res.flipped is True
+    assert res.turn == "b"
+    assert res.fen == s1.to_fen()
+
+
+def test_explicit_side_pref_locks_white_or_black_orientation():
+    s0 = ChessBoardState.starting_position()
+    img0_flipped = _render_synthetic_frame(s0, flipped=True)
+    img0_white = _render_synthetic_frame(s0, flipped=False)
+
+    det = BoardDetector()
+    r_b = det.process_frame(img0_flipped, side_pref="b")
+    assert r_b.status == "ok"
+    assert r_b.flipped is True
+
+    r_w = det.process_frame(img0_white, side_pref="w")
+    assert r_w.status == "ok"
+    assert r_w.flipped is False
+
+    det2 = BoardDetector()
+    r2_w = det2.process_frame(img0_white, side_pref="w")
+    assert r2_w.flipped is False
+    # Live toggle to "b" locks flipped=True immediately
+    r2_b = det2.process_frame(img0_flipped, side_pref="b")
+    assert r2_b.flipped is True
+
+
+def test_extract_and_frame_speed_under_25ms_budget():
+    import time
+    from vision_core.board_detector import _extract_square_observations
+
+    s0 = ChessBoardState.starting_position()
+    s1 = s0.push_uci("e2e4")
+    img0 = _render_synthetic_frame(s0, width=1920, height=1080, bx=300, by=120, sq=90)
+    img1 = _render_synthetic_frame(s1, width=1920, height=1080, bx=300, by=120, sq=90)
+    det = BoardDetector()
+    r0 = det.process_frame(img0)
+    assert r0.bounds is not None
+    det.process_frame(img1)  # leave Move-1 verify & warm steady cache
+    # Warm extract JIT/CPU cache once, then measure 8 iterations
+    _extract_square_observations(img1, r0.bounds, False, None)
+    t0 = time.perf_counter()
+    for _ in range(8):
+        _extract_square_observations(img1, r0.bounds, False, None)
+    avg_extract_ms = (time.perf_counter() - t0) * 1000.0 / 8.0
+    assert avg_extract_ms < 25.0, f"Extract exceeded 25ms budget: {avg_extract_ms:.2f}ms"

@@ -113,3 +113,39 @@ def test_luxury_splash_screen(qapp):
     splash.close()
 
 
+
+
+def test_side_pill_buttons_and_alt_s_cycle(monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    import main
+
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(main, "ensure_overlay_running", lambda *a, **k: None)
+    monkeypatch.setattr(main, "ensure_vision_runner_running", lambda *a, **k: None)
+    monkeypatch.setattr(main, "install_scripts_and_extension", lambda *a, **k: None)
+
+    main.arrow_state["side"] = "auto"
+    win = main.ControlCenterWindow("DEV", "hwid")
+    try:
+        assert set(win.side_buttons.keys()) == {"auto", "w", "b"}
+        assert win.side_buttons["auto"].text() == "AUTO"
+        assert win.side_buttons["w"].text() == "WHITE"
+        assert win.side_buttons["b"].text() == "BLACK"
+        assert win.side_buttons["auto"].property("active") == "true"
+
+        win.side_buttons["b"].click()
+        assert main.arrow_state["side"] == "b"
+        assert win.side_combo.currentData() == "b"
+        assert win.side_buttons["b"].property("active") == "true"
+        assert win.side_buttons["auto"].property("active") == "false"
+
+        win._cycle_side_lock()
+        assert main.arrow_state["side"] == "auto"
+        win._cycle_side_lock()
+        assert main.arrow_state["side"] == "w"
+        assert win.side_buttons["w"].property("active") == "true"
+    finally:
+        main.arrow_state["side"] = "auto"
+        win.status_timer.stop()
+        win.close()
+        app.processEvents()

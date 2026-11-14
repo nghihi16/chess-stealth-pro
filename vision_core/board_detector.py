@@ -543,6 +543,8 @@ class _SquareObs:
     grad_energy: float = 0.0
     sym_x: float = 0.0
     arrow_masked: bool = False
+    core_lum: float = 128.0
+    vert_span: float = 0.0
 
 
 def _build_board_arrow_mask(
@@ -624,10 +626,13 @@ def _extract_square_observations(
 ) -> list[_SquareObs]:
     """Extract piece occupancy, foreground color, normalized patch, and highlight metric per square."""
     board_crop = img_bgr[bounds.y : bounds.y + bounds.size, bounds.x : bounds.x + bounds.size]
+    board_gray_u8 = cv2.cvtColor(board_crop, cv2.COLOR_BGR2GRAY)
+
     sq_f = bounds.size / 8.0
     l_bg = np.array(bounds.light_bgr, dtype=np.float32)
     d_bg = np.array(bounds.dark_bgr, dtype=np.float32)
     erode_kernel = np.ones((3, 3), dtype=np.uint8)
+    close_kernel = np.ones((3, 3), dtype=np.uint8)
 
     raw_local_bgs: list[np.ndarray] = []
     has_measured_bg: list[bool] = []
@@ -638,8 +643,8 @@ def _extract_square_observations(
         y0 = round(r * sq_f)
         y1 = round((r + 1) * sq_f)
         sh = y1 - y0
-        cy0 = max(y0, y0 + int(round(sh * 0.17)))
-        cy1 = min(y1, y0 + int(round(sh * 0.83)))
+        cy0 = max(y0, y0 + int(round(sh * 0.10)))
+        cy1 = min(y1, y0 + int(round(sh * 0.90)))
         by0_top = y0 + max(1, int(round(sh * 0.04)))
         by1_top = y0 + max(3, int(round(sh * 0.13)))
         by0_bot = y1 - max(3, int(round(sh * 0.13)))
@@ -649,8 +654,8 @@ def _extract_square_observations(
             x0 = round(c * sq_f)
             x1 = round((c + 1) * sq_f)
             sw = x1 - x0
-            cx0 = max(x0, x0 + int(round(sw * 0.17)))
-            cx1 = min(x1, x0 + int(round(sw * 0.83)))
+            cx0 = max(x0, x0 + int(round(sw * 0.12)))
+            cx1 = min(x1, x0 + int(round(sw * 0.88)))
             bx0_right = x1 - max(3, int(round(sw * 0.14)))
             bx1_right = x1 - max(1, int(round(sw * 0.04)))
 
@@ -659,6 +664,10 @@ def _extract_square_observations(
             parities.append(parity)
 
             center_bgr = board_crop[cy0:cy1, cx0:cx1]
+            c_gray_u8 = board_gray_u8[cy0:cy1, cx0:cx1]
+            ch_px, cw_px = center_bgr.shape[:2]
+            total_center_px = max(1, ch_px * cw_px)
+
             # Sample right-side corner bands away from coordinate letters on a-file and rank-1
             tr_patch = board_crop[by0_top:by1_top, bx0_right:bx1_right]
             br_patch = board_crop[by0_bot:by1_bot, bx0_right:bx1_right]
@@ -666,95 +675,142 @@ def _extract_square_observations(
             if arrow_mask is not None:
                 c_arr = arrow_mask[cy0:cy1, cx0:cx1]
                 c_eroded = cv2.erode(c_arr, erode_kernel, iterations=1) > 0
-                c_mask = c_eroded if int(np.count_nonzero(c_eroded)) >= 12 else (c_arr > 0)
+                n_eroded = int(np.count_nonzero(c_eroded))
+                c_mask = c_eroded if n_eroded >= 12 else (c_arr > 0)
+                n_valid = int(np.count_nonzero(c_mask)) if n_eroded < 12 else n_eroded
+                valid_ratio = float(n_valid) / float(total_center_px)
                 tr_mask = arrow_mask[by0_top:by1_top, bx0_right:bx1_right] > 0
                 br_mask = arrow_mask[by0_bot:by1_bot, bx0_right:bx1_right] > 0
-                valid_center_px = center_bgr[c_mask]
                 bg_parts = []
                 if tr_mask.any():
                     bg_parts.append(tr_patch[tr_mask])
                 if br_mask.any():
                     bg_parts.append(br_patch[br_mask])
-            else:
-                c_mask = None
-                valid_center_px = center_bgr.reshape(-1, 3)
-                bg_parts = [tr_patch.reshape(-1, 3), br_patch.reshape(-1, 3)]
-
-            total_center_px = max(1, center_bgr.shape[0] * center_bgr.shape[1])
-            valid_ratio = len(valid_center_px) / float(total_center_px)
-            if arrow_mask is not None:
                 iy0 = max(y0, y0 + int(round(sh * 0.28)))
                 iy1 = min(y1, y0 + int(round(sh * 0.72)))
                 ix0 = max(x0, x0 + int(round(sw * 0.28)))
                 ix1 = min(x1, x0 + int(round(sw * 0.72)))
                 core_mask = arrow_mask[iy0:iy1, ix0:ix1] > 0
-                core_valid_ratio = float(np.mean(core_mask)) if core_mask.size else 1.0
+                core_valid_ratio = float(np.count_nonzero(core_mask)) / float(max(1, core_mask.size)) if core_mask.size else 1.0
+                bg_samples = np.concatenate(bg_parts, axis=0) if bg_parts else np.empty((0, 3), dtype=np.uint8)
             else:
+                c_mask = None
+                n_valid = total_center_px
+                valid_ratio = 1.0
                 core_valid_ratio = 1.0
+                bg_samples = np.concatenate((tr_patch.reshape(-1, 3), br_patch.reshape(-1, 3)), axis=0)
 
-            bg_samples = np.concatenate(bg_parts, axis=0) if bg_parts else np.empty((0, 3), dtype=np.uint8)
             expected_bg = l_bg if parity == 0 else d_bg
-            if len(bg_samples) >= 4:
-                local_bg = np.median(bg_samples.astype(np.float32), axis=0)
+            n_bg = len(bg_samples)
+            if n_bg >= 4:
+                bg_sorted = np.sort(bg_samples, axis=0)
+                local_bg = bg_sorted[n_bg >> 1].astype(np.float32)
                 has_measured_bg.append(True)
             else:
                 local_bg = expected_bg
                 has_measured_bg.append(False)
             raw_local_bgs.append(local_bg)
 
-            c_f = center_bgr.astype(np.float32)
-            d_loc = np.abs(c_f - local_bg)
-            d_mean = d_loc.mean(axis=2)
-            d_max = d_loc.max(axis=2)
-            if np.linalg.norm(local_bg - expected_bg) < 16.0:
-                d_par = np.abs(c_f - expected_bg)
-                d_mean = np.minimum(d_mean, d_par.mean(axis=2))
-                d_max = np.minimum(d_max, d_par.max(axis=2))
-            fg_2d = (d_mean > 15.0) | (d_max > 22.0)
+            lb0, lb1, lb2 = int(round(local_bg[0])), int(round(local_bg[1])), int(round(local_bg[2]))
+            d_loc = cv2.absdiff(center_bgr, (lb0, lb1, lb2, 0))
+            d0, d1, d2 = d_loc[:, :, 0], d_loc[:, :, 1], d_loc[:, :, 2]
+            d_sum = d0.astype(np.uint16) + d1 + d2
+            d_mx = np.maximum(np.maximum(d0, d1), d2)
+            diff_par_sq = float((lb0 - int(expected_bg[0])) ** 2 + (lb1 - int(expected_bg[1])) ** 2 + (lb2 - int(expected_bg[2])) ** 2)
+            if diff_par_sq < 256.0:
+                eb0, eb1, eb2 = int(round(expected_bg[0])), int(round(expected_bg[1])), int(round(expected_bg[2]))
+                d_par = cv2.absdiff(center_bgr, (eb0, eb1, eb2, 0))
+                e0, e1, e2 = d_par[:, :, 0], d_par[:, :, 1], d_par[:, :, 2]
+                d_sum = np.minimum(d_sum, e0.astype(np.uint16) + e1 + e2)
+                d_mx = np.minimum(d_mx, np.maximum(np.maximum(e0, e1), e2))
+            fg_2d = (d_sum > 45) | (d_mx > 22)
+            if c == 0:
+                r_tl = max(0, y0 + int(round(sh * 0.27)) - cy0)
+                c_tl = max(0, x0 + int(round(sw * 0.25)) - cx0)
+                if r_tl > 0 and c_tl > 0:
+                    fg_2d[:r_tl, :c_tl] = False
+            if r == 7:
+                r_br = max(0, y0 + int(round(sh * 0.77)) - cy0)
+                c_br = max(0, x0 + int(round(sw * 0.75)) - cx0)
+                if r_br < ch_px and c_br < cw_px:
+                    fg_2d[r_br:, c_br:] = False
 
-            occ_thresh = 0.035 if (arrow_mask is not None and (valid_ratio < 0.85 or core_valid_ratio < 0.78)) else 0.12
-            if c_mask is not None:
-                valid_fg_2d = fg_2d & c_mask
-                n_valid = int(np.count_nonzero(c_mask))
-                if n_valid >= 12:
-                    fg_frac = float(np.count_nonzero(valid_fg_2d)) / float(n_valid)
-                    occupied = fg_frac >= occ_thresh
-                    fg_bgr = np.median(c_f[valid_fg_2d], axis=0) if np.any(valid_fg_2d) else local_bg
-                else:
-                    fg_frac = 0.0
-                    occupied = False
-                    fg_bgr = local_bg
+            arrow_masked_sq = bool(c_mask is not None and n_valid < total_center_px)
+            raw_fg = (fg_2d & c_mask) if c_mask is not None else fg_2d
+
+            raw_cnt = int(np.count_nonzero(raw_fg))
+            if raw_cnt >= 6:
+                closed_u8 = cv2.morphologyEx((raw_fg.astype(np.uint8) * 255), cv2.MORPH_CLOSE, close_kernel)
+                pad = np.zeros((ch_px + 2, cw_px + 2), dtype=np.uint8)
+                pad[1:-1, 1:-1] = closed_u8
+                ff_mask = np.zeros((ch_px + 4, cw_px + 4), dtype=np.uint8)
+                cv2.floodFill(pad, ff_mask, (0, 0), 128)
+                filled_fg = pad[1:-1, 1:-1] != 128
+                if c_mask is not None:
+                    filled_fg = filled_fg & c_mask
             else:
-                valid_fg_2d = fg_2d
-                fg_frac = float(np.mean(fg_2d))
-                occupied = fg_frac >= occ_thresh
-                fg_bgr = np.median(c_f[fg_2d], axis=0) if np.any(fg_2d) else local_bg
+                filled_fg = raw_fg
+
+            occ_thresh = 0.025 if (arrow_mask is not None and (valid_ratio < 0.85 or core_valid_ratio < 0.78)) else 0.075
+            ys, xs = np.nonzero(filled_fg)
+            vert_span = float(int(ys.max()) - int(ys.min()) + 1) / float(max(1, ch_px)) if ys.size else 0.0
+
+            if n_valid >= 12:
+                fg_frac = float(ys.size) / float(n_valid)
+                occupied = (fg_frac >= occ_thresh) and (arrow_masked_sq or vert_span >= 0.24)
+            else:
+                fg_frac = 0.0
+                occupied = False
+
+            if occupied and ys.size > 0:
+                core_fg = cv2.erode(filled_fg.astype(np.uint8), erode_kernel, iterations=1) > 0
+                if c_mask is not None:
+                    core_fg = core_fg & c_mask
+                sample_mask = core_fg if int(np.count_nonzero(core_fg)) >= 10 else filled_fg
+                pts = center_bgr[sample_mask]
+                if len(pts) > 16:
+                    pts = pts[::2]
+                fg_bgr = np.sort(pts, axis=0)[len(pts) >> 1].astype(np.float32)
+            elif ys.size > 0:
+                pts = center_bgr[filled_fg]
+                fg_bgr = np.sort(pts, axis=0)[len(pts) >> 1].astype(np.float32)
+            else:
+                fg_bgr = local_bg
+
             occluded = ((valid_ratio < 0.30) or (core_valid_ratio < 0.35)) and not occupied
 
             fg_lum = float(0.114 * fg_bgr[0] + 0.587 * fg_bgr[1] + 0.299 * fg_bgr[2])
+            core_lum = fg_lum
+            grad_energy = 0.0
 
-            c_gray = cv2.cvtColor(center_bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
-            gx = cv2.Sobel(c_gray, cv2.CV_32F, 1, 0, ksize=3)
-            gy = cv2.Sobel(c_gray, cv2.CV_32F, 0, 1, ksize=3)
-            gmag = np.hypot(gx, gy)
-            if c_mask is not None:
-                grad_energy = float(np.mean(gmag[c_mask])) if np.any(c_mask) else 0.0
-            else:
-                grad_energy = float(np.mean(gmag))
-
-            if c_mask is not None and not np.all(c_mask):
+            if arrow_masked_sq and c_mask is not None:
                 clean_center = center_bgr.copy()
                 clean_center[~c_mask] = np.clip(local_bg, 0, 255).astype(np.uint8)
                 patch_28 = cv2.resize(clean_center, (28, 28), interpolation=cv2.INTER_AREA)
             else:
                 patch_28 = cv2.resize(center_bgr, (28, 28), interpolation=cv2.INTER_AREA)
 
-            if occupied and not occluded and np.any(valid_fg_2d):
-                fg_pixels = c_gray[valid_fg_2d]
+            if occupied and not occluded and ys.size > 0:
+                y_min, y_max = int(ys.min()), int(ys.max())
+                x_min, x_max = int(xs.min()), int(xs.max())
+                sub_fg = filled_fg[y_min : y_max + 1, x_min : x_max + 1]
+                sub_gray = c_gray_u8[y_min : y_max + 1, x_min : x_max + 1].astype(np.float32)
+                bh, bw = sub_fg.shape
+                side = max(bh, bw, 1)
+                pad_top = (side - bh) // 2
+                pad_left = (side - bw) // 2
+
+                sil_sq = np.zeros((side, side), dtype=np.float32)
+                sil_sq[pad_top : pad_top + bh, pad_left : pad_left + bw] = sub_fg.astype(np.float32)
+
+                fg_pixels = sub_gray[sub_fg]
                 fg_mean = float(np.mean(fg_pixels)) if fg_pixels.size else 128.0
-                rel_lum = ((c_gray - fg_mean) / 128.0) * valid_fg_2d.astype(np.float32)
-                sil_20 = cv2.resize(valid_fg_2d.astype(np.float32), (20, 20), interpolation=cv2.INTER_AREA)
-                lum_20 = cv2.resize(rel_lum, (20, 20), interpolation=cv2.INTER_AREA)
+                rel_sub = ((sub_gray - fg_mean) / 128.0) * sub_fg.astype(np.float32)
+                lum_sq = np.zeros((side, side), dtype=np.float32)
+                lum_sq[pad_top : pad_top + bh, pad_left : pad_left + bw] = rel_sub
+
+                sil_20 = cv2.resize(sil_sq, (20, 20), interpolation=cv2.INTER_AREA)
+                lum_20 = cv2.resize(lum_sq, (20, 20), interpolation=cv2.INTER_AREA)
                 sym_x = float(np.mean(np.abs(sil_20 - sil_20[:, ::-1])))
             else:
                 sil_20 = None
@@ -777,7 +833,9 @@ def _extract_square_observations(
                     lum_20=lum_20,
                     grad_energy=grad_energy,
                     sym_x=sym_x,
-                    arrow_masked=bool(c_mask is not None and not np.all(c_mask)),
+                    arrow_masked=arrow_masked_sq,
+                    core_lum=core_lum,
+                    vert_span=vert_span,
                 )
             )
 
@@ -870,13 +928,45 @@ class BoardDetector:
         mid_occ = sum(1 for o in obs if o.row in (2, 3, 4, 5) and o.occupied and not o.occluded)
         return top_occ >= 14 and bot_occ >= 14 and mid_occ == 0
 
-    def _calibrate_start(self, img_bgr: np.ndarray, bounds: BoardBounds, obs: list[_SquareObs]) -> DetectionResult:
+    def _detect_orientation_from_obs(self, obs: list[_SquareObs], side_pref: str = "auto") -> bool:
+        pref = (side_pref or "auto").strip().lower()
+        if pref == "w":
+            return False
+        if pref == "b":
+            return True
+
+        top_cnt = sum(1 for o in obs if o.row in (0, 1) and (o.occupied or o.occluded))
+        bot_cnt = sum(1 for o in obs if o.row in (6, 7) and (o.occupied or o.occluded))
+        mid_cnt = sum(1 for o in obs if o.row in (2, 3, 4, 5) and o.occupied and not o.occluded)
+        # On a 1-ply opening, White moved first so White's back two ranks lost 1 piece.
+        if mid_cnt == 1 and top_cnt + bot_cnt == 31:
+            if top_cnt == 15 and bot_cnt == 16:
+                return True
+            if bot_cnt == 15 and top_cnt == 16:
+                return False
+
+        top_lums = [
+            o.core_lum for o in obs
+            if o.row in (0, 1) and o.occupied and not o.occluded and not o.arrow_masked
+        ] or [o.core_lum for o in obs if o.row in (0, 1) and o.occupied and not o.occluded]
+        bot_lums = [
+            o.core_lum for o in obs
+            if o.row in (6, 7) and o.occupied and not o.occluded and not o.arrow_masked
+        ] or [o.core_lum for o in obs if o.row in (6, 7) and o.occupied and not o.occluded]
+        top_lum = float(np.median(top_lums)) if top_lums else 0.0
+        bot_lum = float(np.median(bot_lums)) if bot_lums else 255.0
+        return bot_lum < top_lum - 5.0
+
+    def _calibrate_start(
+        self,
+        img_bgr: np.ndarray,
+        bounds: BoardBounds,
+        obs: list[_SquareObs],
+        side_pref: str = "auto",
+    ) -> DetectionResult:
         top_fgs = [o.fg_bgr for o in obs if o.row in (0, 1) and o.occupied and not o.occluded]
         bot_fgs = [o.fg_bgr for o in obs if o.row in (6, 7) and o.occupied and not o.occluded]
-        top_lum = float(np.median([0.114 * b[0] + 0.587 * b[1] + 0.299 * b[2] for b in top_fgs])) if top_fgs else 0.0
-        bot_lum = float(np.median([0.114 * b[0] + 0.587 * b[1] + 0.299 * b[2] for b in bot_fgs])) if bot_fgs else 255.0
-
-        flipped = bot_lum < top_lum - 5.0
+        flipped = self._detect_orientation_from_obs(obs, side_pref)
         self.bounds = bounds
         self.calibrated = True
         self.flipped = flipped
@@ -887,7 +977,7 @@ class BoardDetector:
         self._mismatch_streak = 0
         self._prev_fast_thumb = None
         self._prev_fast_sig = None
-        self._awaiting_first_move_verify = True
+        self._awaiting_first_move_verify = (side_pref or "auto").strip().lower() == "auto"
         self.last_obs = obs
 
         self._white_fg_bgr = np.median(np.stack(top_fgs if flipped else bot_fgs, axis=0), axis=0)
@@ -906,30 +996,170 @@ class BoardDetector:
             source="start",
         )
 
-    def _capture_start_piece_patches(self, obs: list[_SquareObs], flipped: bool) -> None:
+    def _try_calibrate_opening(
+        self,
+        img_bgr: np.ndarray,
+        bounds: BoardBounds,
+        obs: list[_SquareObs],
+        side_pref: str = "auto",
+    ) -> DetectionResult | None:
+        top_cnt = sum(1 for o in obs if o.row in (0, 1) and (o.occupied or o.occluded))
+        bot_cnt = sum(1 for o in obs if o.row in (6, 7) and (o.occupied or o.occluded))
+        mid_cnt = sum(1 for o in obs if o.row in (2, 3, 4, 5) and o.occupied and not o.occluded)
+        if not (top_cnt >= 15 and bot_cnt >= 15 and 1 <= mid_cnt <= 2 and (top_cnt + bot_cnt + mid_cnt) == 32):
+            return None
+
+        top_fgs = [o.fg_bgr for o in obs if o.row in (0, 1) and o.occupied and not o.occluded]
+        bot_fgs = [o.fg_bgr for o in obs if o.row in (6, 7) and o.occupied and not o.occluded]
+        if not top_fgs or not bot_fgs:
+            return None
+
+        flipped = self._detect_orientation_from_obs(obs, side_pref)
+        obs_by_sq = {screen_rc_to_sq(o.row, o.col, flipped=flipped): o for o in obs}
+
+        self._white_fg_bgr = np.median(np.stack(top_fgs if flipped else bot_fgs, axis=0), axis=0)
+        self._black_fg_bgr = np.median(np.stack(bot_fgs if flipped else top_fgs, axis=0), axis=0)
+        expected_sides = {sq: self._classify_side(o) for sq, o in obs_by_sq.items()}
+
+        start = ChessBoardState.starting_position()
+        hits: list[tuple[ChessBoardState, ChessBoardState, str]] = []
+        if mid_cnt == 1:
+            for mv1 in start.legal_moves():
+                s1 = start.push_uci(mv1)
+                if self._match_state_error(s1, obs_by_sq, flipped, expected_sides, prev_state=start) == 0.0:
+                    hits.append((s1, start, mv1))
+        else:
+            for mv1 in start.legal_moves():
+                try:
+                    f1 = parse_sq(mv1[:2])
+                except ValueError:
+                    continue
+                if obs_by_sq[f1].occupied or obs_by_sq[f1].occluded:
+                    continue
+                s1 = start.push_uci(mv1)
+                for mv2 in s1.legal_moves():
+                    try:
+                        f2 = parse_sq(mv2[:2])
+                    except ValueError:
+                        continue
+                    if obs_by_sq[f2].occupied or obs_by_sq[f2].occluded:
+                        continue
+                    s2 = s1.push_uci(mv2)
+                    if self._match_state_error(s2, obs_by_sq, flipped, expected_sides, prev_state=s1) == 0.0:
+                        hits.append((s2, s1, mv2))
+                        if len(hits) > 1:
+                            break
+                if len(hits) > 1:
+                    break
+
+        if len(hits) != 1:
+            self._white_fg_bgr = None
+            self._black_fg_bgr = None
+            return None
+
+        found_state, prev_state, last_mv = hits[0]
+        self.bounds = bounds
+        self.calibrated = True
+        self.flipped = flipped
+        self.state = found_state
+        self._prev_state = prev_state
+        self._state_history = [start] if prev_state == start else [start, prev_state]
+        self._prev_occ_sig = None
+        self._mismatch_streak = 0
+        self._prev_fast_thumb = None
+        self._prev_fast_sig = None
+        self._awaiting_first_move_verify = False
+        self.last_obs = obs
+
+        w_fgs = [obs_by_sq[sq].fg_bgr for sq in range(64) if found_state.board[sq] and piece_side(found_state.board[sq]) == "w" and obs_by_sq[sq].occupied and not obs_by_sq[sq].occluded]
+        b_fgs = [obs_by_sq[sq].fg_bgr for sq in range(64) if found_state.board[sq] and piece_side(found_state.board[sq]) == "b" and obs_by_sq[sq].occupied and not obs_by_sq[sq].occluded]
+        if w_fgs:
+            self._white_fg_bgr = np.median(np.stack(w_fgs, axis=0), axis=0)
+        if b_fgs:
+            self._black_fg_bgr = np.median(np.stack(b_fgs, axis=0), axis=0)
+
+        self._record_patches(obs, flipped)
+        self._capture_start_piece_patches(obs, flipped, state=found_state)
+        return DetectionResult(
+            status="ok",
+            bounds=bounds,
+            fen=self.state.to_fen(),
+            flipped=self.flipped,
+            board_key=self._board_key(self.state),
+            turn=self.state.turn,
+            last_move=last_mv,
+            source="start",
+        )
+
+    def _capture_start_piece_patches(
+        self,
+        obs: list[_SquareObs],
+        flipped: bool,
+        state: ChessBoardState | None = None,
+    ) -> None:
         self._piece_patches.clear()
         self._piece_templates.clear()
-        start = ChessBoardState.starting_position()
-        grid = start.to_grid(flipped=flipped)
-        sils_by_ch: dict[str, list[np.ndarray]] = {}
+        ref_state = state if state is not None else ChessBoardState.starting_position()
+        grid = ref_state.to_grid(flipped=flipped)
+        sils_by_kind_par: dict[str, dict[int, list[np.ndarray]]] = {}
+        fracs_by_kind_par: dict[str, dict[int, list[float]]] = {}
+        syms_by_kind_par: dict[str, dict[int, list[float]]] = {}
         lums_by_ch: dict[str, list[np.ndarray]] = {}
-        fracs_by_ch: dict[str, list[float]] = {}
-        syms_by_ch: dict[str, list[float]] = {}
+
         for o in obs:
             ch = grid[o.row][o.col]
-            if ch and not o.occluded:
-                self._piece_patches[ch] = o.patch_bgr
+            if not ch or o.occluded or o.arrow_masked:
+                continue
+            self._piece_patches[ch] = o.patch_bgr
+            if o.sil_20 is not None and o.lum_20 is not None:
+                kind = ch.upper()
+                par = (o.row + o.col) % 2
+                sils_by_kind_par.setdefault(kind, {}).setdefault(par, []).append(o.sil_20)
+                fracs_by_kind_par.setdefault(kind, {}).setdefault(par, []).append(o.fg_frac)
+                syms_by_kind_par.setdefault(kind, {}).setdefault(par, []).append(o.sym_x)
+                lums_by_ch.setdefault(ch, []).append(o.lum_20)
+
+        if len(sils_by_kind_par) < 6:
+            for o in obs:
+                ch = grid[o.row][o.col]
+                if not ch or o.occluded:
+                    continue
+                self._piece_patches.setdefault(ch, o.patch_bgr)
                 if o.sil_20 is not None and o.lum_20 is not None:
-                    sils_by_ch.setdefault(ch, []).append(o.sil_20)
-                    lums_by_ch.setdefault(ch, []).append(o.lum_20)
-                    fracs_by_ch.setdefault(ch, []).append(o.fg_frac)
-                    syms_by_ch.setdefault(ch, []).append(o.sym_x)
-        for ch, sils in sils_by_ch.items():
-            mean_sil = np.mean(np.stack(sils, axis=0), axis=0)
-            mean_lum = np.mean(np.stack(lums_by_ch[ch], axis=0), axis=0)
-            mean_frac = float(np.mean(fracs_by_ch[ch]))
-            mean_sym = float(np.mean(syms_by_ch[ch]))
-            self._piece_templates[ch] = (mean_sil, mean_lum, mean_frac, mean_sym)
+                    kind = ch.upper()
+                    par = (o.row + o.col) % 2
+                    if not sils_by_kind_par.get(kind, {}).get(par):
+                        sils_by_kind_par.setdefault(kind, {}).setdefault(par, []).append(o.sil_20)
+                        fracs_by_kind_par.setdefault(kind, {}).setdefault(par, []).append(o.fg_frac)
+                        syms_by_kind_par.setdefault(kind, {}).setdefault(par, []).append(o.sym_x)
+                    if not lums_by_ch.get(ch):
+                        lums_by_ch.setdefault(ch, []).append(o.lum_20)
+
+        def _parity_mean(par_map: dict[int, list[np.ndarray]]):
+            par_means = [np.mean(np.stack(vals, axis=0), axis=0) for vals in par_map.values() if vals]
+            return np.mean(np.stack(par_means, axis=0), axis=0) if par_means else None
+
+        def _parity_scalar_mean(par_map: dict[int, list[float]]) -> float:
+            par_means = [float(np.mean(vals)) for vals in par_map.values() if vals]
+            return float(np.mean(par_means)) if par_means else 0.0
+
+        for kind in ("K", "Q", "R", "B", "N", "P"):
+            par_sils = sils_by_kind_par.get(kind)
+            if not par_sils:
+                continue
+            mean_sil = _parity_mean(par_sils)
+            if mean_sil is None:
+                continue
+            mean_frac = _parity_scalar_mean(fracs_by_kind_par.get(kind, {}))
+            mean_sym = _parity_scalar_mean(syms_by_kind_par.get(kind, {}))
+            for ch in (kind, kind.lower()):
+                lum_list = lums_by_ch.get(ch)
+                mean_lum = (
+                    np.mean(np.stack(lum_list, axis=0), axis=0)
+                    if lum_list
+                    else np.zeros_like(mean_sil, dtype=np.float32)
+                )
+                self._piece_templates[ch] = (mean_sil, mean_lum, mean_frac, mean_sym)
 
     def _template_cost(self, o: _SquareObs, ch: str) -> float:
         tpl = self._piece_templates.get(ch)
@@ -977,6 +1207,7 @@ class BoardDetector:
                 and board[sq].upper() in ("Q", "R", "B", "N")
                 and sq in obs_by_sq
                 and not obs_by_sq[sq].occluded
+                and not obs_by_sq[sq].arrow_masked
                 and obs_by_sq[sq].occupied
             ]
             for i in range(len(sqs)):
@@ -987,9 +1218,15 @@ class BoardDetector:
                     if ch1 == ch2:
                         continue
                     o1, o2 = obs_by_sq[sq1], obs_by_sq[sq2]
-                    cur_cost = self._template_cost(o1, ch1) + self._template_cost(o2, ch2)
-                    swap_cost = self._template_cost(o1, ch2) + self._template_cost(o2, ch1)
-                    if swap_cost + 0.08 < cur_cost:
+                    c11 = self._template_cost(o1, ch1)
+                    c22 = self._template_cost(o2, ch2)
+                    c12 = self._template_cost(o1, ch2)
+                    c21 = self._template_cost(o2, ch1)
+                    if (
+                        c12 + 0.04 < c11
+                        and c21 + 0.04 < c22
+                        and (c12 + c21) + 0.08 < (c11 + c22)
+                    ):
                         board[sq1], board[sq2] = ch2, ch1
                         repaired = True
         if repaired:
@@ -1155,8 +1392,6 @@ class BoardDetector:
         self._mismatch_streak = 0
         self.last_obs = obs
         self._record_patches(obs, self.flipped)
-        obs_by_sq = {screen_rc_to_sq(o.row, o.col, flipped=self.flipped): o for o in obs}
-        self._repair_swapped_pieces(obs_by_sq)
         return DetectionResult(
             status="ok",
             bounds=bounds,
@@ -1230,26 +1465,70 @@ class BoardDetector:
             b_char = "B" if side == "w" else "b"
             n_char = "N" if side == "w" else "n"
             p_char = "P" if side == "w" else "p"
+            all_kinds = (k_char, q_char, r_char, b_char, n_char, p_char)
             non_king_kinds = (q_char, r_char, b_char, n_char, p_char)
 
-            # Choose unique King square
-            best_k_sq = min(sqs, key=lambda sq: self._template_cost(obs_by_sq[sq], k_char))
+            # Anchor unmoved pieces whose patch barely changed since previous verified frame
+            anchored: dict[int, str] = {}
+            if self.state is not None and self._prev_patches:
+                for sq in sqs:
+                    prev_ch = self.state.board[sq]
+                    if prev_ch not in all_kinds:
+                        continue
+                    o = obs_by_sq[sq]
+                    if o.arrow_masked or sq not in self._prev_patches:
+                        continue
+                    old_p = self._prev_patches[sq]
+                    if old_p.shape != o.patch_bgr.shape:
+                        continue
+                    pdiff = float(np.mean(np.abs(o.patch_bgr.astype(np.float32) - old_p.astype(np.float32))))
+                    if pdiff <= 14.0:
+                        raw_prev = self._template_cost(o, prev_ch)
+                        best_alt = min(self._template_cost(o, alt) for alt in all_kinds if alt != prev_ch)
+                        if best_alt + 0.08 >= raw_prev:
+                            anchored[sq] = prev_ch
+
+            # Choose unique King square (preferring anchored King if present)
+            anchored_k = [sq for sq, ch in anchored.items() if ch == k_char]
+            if len(anchored_k) == 1:
+                best_k_sq = anchored_k[0]
+            else:
+                best_k_sq = min(sqs, key=lambda sq: self._template_cost(obs_by_sq[sq], k_char))
             board[best_k_sq] = k_char
 
             std_caps = {q_char: 1, r_char: 2, b_char: 2, n_char: 2, p_char: 8}
             if self.state is not None:
+                prev_counts = {
+                    ch: sum(1 for x in self.state.board if x == ch)
+                    for ch in non_king_kinds
+                }
+                promo_rank = 7 if side == "w" else 0
+                has_promo_cand = prev_counts[p_char] > 0 and any(
+                    (sq // 8 == promo_rank) and (sq not in anchored)
+                    for sq in sqs
+                )
                 max_counts = {
-                    ch: max(cap, sum(1 for x in self.state.board if x == ch))
-                    for ch, cap in std_caps.items()
+                    ch: prev_counts[ch] + (1 if (has_promo_cand and ch != p_char) else 0)
+                    for ch in non_king_kinds
                 }
             else:
                 max_counts = dict(std_caps)
             used_counts = {ch: 0 for ch in non_king_kinds}
 
-            # Assign pieces in descending confidence margin order with FIDE inventory caps
+            # Pin anchored non-King pieces first
             sqs_no_k = [sq for sq in sqs if sq != best_k_sq]
-            candidates: list[tuple[float, int, list[tuple[float, str]]]] = []
+            free_sqs: list[int] = []
             for sq in sqs_no_k:
+                ach = anchored.get(sq)
+                if ach and ach in used_counts and used_counts[ach] < max_counts[ach]:
+                    board[sq] = ach
+                    used_counts[ach] += 1
+                else:
+                    free_sqs.append(sq)
+
+            # Assign remaining unanchored pieces in descending confidence margin order with FIDE conservation
+            candidates: list[tuple[float, int, list[tuple[float, str]]]] = []
+            for sq in free_sqs:
                 o = obs_by_sq[sq]
                 rank = sq // 8
                 allowed = [ch for ch in non_king_kinds if not (ch == p_char and rank in (0, 7))]
@@ -1267,13 +1546,13 @@ class BoardDetector:
                 board[sq] = chosen_ch
                 used_counts[chosen_ch] += 1
 
-            # 2-opt pairwise swap check to ensure global best piece-type assignment (e.g. Q vs N)
+            # 2-opt pairwise swap check on unanchored squares to ensure global best piece-type assignment
             for _ in range(3):
                 swapped = False
-                for i in range(len(sqs_no_k)):
-                    sq1 = sqs_no_k[i]
-                    for j in range(i + 1, len(sqs_no_k)):
-                        sq2 = sqs_no_k[j]
+                for i in range(len(free_sqs)):
+                    sq1 = free_sqs[i]
+                    for j in range(i + 1, len(free_sqs)):
+                        sq2 = free_sqs[j]
                         ch1, ch2 = board[sq1], board[sq2]
                         if ch1 == ch2:
                             continue
@@ -1344,9 +1623,13 @@ class BoardDetector:
         img_bgr: np.ndarray,
         arrow_px: tuple[float, float, float, float, float] | None = None,
         roi_offset: tuple[int, int] = (0, 0),
+        side_pref: str = "auto",
     ) -> DetectionResult:
         ox, oy = int(roi_offset[0]), int(roi_offset[1])
         img_h, img_w = img_bgr.shape[:2]
+        norm_side = (side_pref or "auto").strip().lower()
+        if norm_side not in ("auto", "w", "b"):
+            norm_side = "auto"
 
         hint_local: BoardBounds | None = None
         if self.bounds is not None:
@@ -1379,7 +1662,7 @@ class BoardDetector:
             and self._mismatch_streak == 0
             and hint_local is not None
             and self._prev_fast_thumb is not None
-            and self._prev_fast_sig == (hint_local.x + ox, hint_local.y + oy, hint_local.size, arrow_local)
+            and self._prev_fast_sig == (hint_local.x + ox, hint_local.y + oy, hint_local.size, arrow_local, norm_side)
         ):
             cand_crop = img_bgr[
                 hint_local.y : hint_local.y + hint_local.size,
@@ -1421,22 +1704,61 @@ class BoardDetector:
         obs = _extract_square_observations(img_bgr, local_bounds, tentative_flipped, arrow_mask)
         self.last_obs = obs
 
-        # Uncalibrated -> require start position first
+        # Uncalibrated -> require start position or Move 1/2 opening
         if not self.calibrated or self.state is None:
             if self._is_start_occupancy(obs):
-                return self._calibrate_start(img_bgr, screen_bounds, obs)
+                return self._calibrate_start(img_bgr, screen_bounds, obs, side_pref=norm_side)
+            opening_res = self._try_calibrate_opening(img_bgr, screen_bounds, obs, side_pref=norm_side)
+            if opening_res is not None:
+                return opening_res
             self.bounds = screen_bounds
             return DetectionResult(status="need_start_pos", bounds=screen_bounds)
 
         # If start position reappears after moves were already played, reset cleanly to Move 1
         if self.state.fullmove > 1 or self.state.turn == "b":
             if self._is_start_occupancy(obs):
-                return self._calibrate_start(img_bgr, screen_bounds, obs)
+                return self._calibrate_start(img_bgr, screen_bounds, obs, side_pref=norm_side)
 
         self.bounds = screen_bounds
 
+        # Explicit user side lock ("w" or "b"): enforce orientation immediately
+        if norm_side in ("w", "b"):
+            want_flipped = norm_side == "b"
+            if self.flipped != want_flipped:
+                self.flipped = want_flipped
+                obs = _extract_square_observations(img_bgr, local_bounds, want_flipped, arrow_mask)
+                self.last_obs = obs
+                obs_check = {screen_rc_to_sq(o.row, o.col, flipped=want_flipped): o for o in obs}
+                if (
+                    self._awaiting_first_move_verify
+                    or (self.state.fullmove == 1 and self.state.turn == "w")
+                ):
+                    self._white_fg_bgr, self._black_fg_bgr = self._black_fg_bgr, self._white_fg_bgr
+                    self._capture_start_piece_patches(obs, want_flipped, state=self.state)
+                else:
+                    # Flip-board midgame vs initial miscalibration check: swap fg refs only if reversed
+                    cur_err = self._match_state_error(
+                        self.state,
+                        obs_check,
+                        want_flipped,
+                        {sq: self._classify_side(o) for sq, o in obs_check.items()},
+                    )
+                    self._white_fg_bgr, self._black_fg_bgr = self._black_fg_bgr, self._white_fg_bgr
+                    swap_err = self._match_state_error(
+                        self.state,
+                        obs_check,
+                        want_flipped,
+                        {sq: self._classify_side(o) for sq, o in obs_check.items()},
+                    )
+                    if cur_err <= swap_err:
+                        self._white_fg_bgr, self._black_fg_bgr = self._black_fg_bgr, self._white_fg_bgr
+                self._record_patches(obs, want_flipped)
+                self._prev_fast_thumb = None
+                self._mismatch_streak = 0
+                self._awaiting_first_move_verify = False
+
         # Move 1 orientation auto-verification: White ALWAYS moves first in FIDE chess
-        if self._awaiting_first_move_verify and self.state.fullmove == 1 and self.state.turn == "w":
+        if norm_side == "auto" and self._awaiting_first_move_verify and self.state.fullmove == 1 and self.state.turn == "w":
             top_empty = sum(1 for o in obs if o.row in (0, 1) and not o.occupied and not o.occluded)
             top_mid = sum(1 for o in obs if o.row in (2, 3) and o.occupied and not o.occluded)
             bot_empty = sum(1 for o in obs if o.row in (6, 7) and not o.occupied and not o.occluded)
@@ -1518,7 +1840,7 @@ class BoardDetector:
             self._record_patches(obs, self.flipped)
             if not self._awaiting_first_move_verify:
                 self._prev_fast_thumb = board_crop[::4, ::4].astype(np.int16)
-                self._prev_fast_sig = (screen_bounds.x, screen_bounds.y, screen_bounds.size, arrow_local)
+                self._prev_fast_sig = (screen_bounds.x, screen_bounds.y, screen_bounds.size, arrow_local, norm_side)
             return DetectionResult(
                 status="ok",
                 bounds=screen_bounds,
