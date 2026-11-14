@@ -54,12 +54,12 @@ def test_installer_reports_installed_version_when_up_to_date_ahead_of_github():
 def test_installer_uses_github_when_remote_newer_than_bundle():
     import installer_gui
 
-    url = "https://github.com/nghihi16/chess-stealth-pro/releases/download/v3.2.4/payload.zip"
+    url = "https://github.com/nghihi16/chess-stealth-pro/releases/download/v3.2.5/payload.zip"
     decision = installer_gui.resolve_installer_update_state(
         result={
             "available": True,
-            "tag": "v3.2.4",
-            "version": (3, 2, 4),
+            "tag": "v3.2.5",
+            "version": (3, 2, 5),
             "download_url": url,
         },
         installed_version="3.2.3",
@@ -67,10 +67,10 @@ def test_installer_uses_github_when_remote_newer_than_bundle():
         is_update_mode=True,
     )
     assert decision["download_url"] == url
-    assert decision["new_version"] == "v3.2.4"
+    assert decision["new_version"] == "v3.2.5"
     assert decision["highlight"] is True
-    assert "v3.2.4" in decision["badge_text"]
-    assert decision["btn_text"] == "Update to v3.2.4"
+    assert "v3.2.5" in decision["badge_text"]
+    assert decision["btn_text"] == "Update to v3.2.5"
 
 
 def test_installer_fresh_install_keeps_bundled_when_github_older():

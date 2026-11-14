@@ -156,6 +156,41 @@ def test_custom_theme_start_calibration_and_2ply_recovery_with_arrow_mask():
     assert res2.fen == "rnbqkbnr/ppppppp1/8/7p/4P3/8/PPPP1PPP/RNBQKBNR w KQkq h6 0 2"
 
 
+def _draw_qt_arrow(img: np.ndarray, bx: int, by: int, sq: float, mv: str, flipped: bool = False) -> tuple[float, float, float, float, float]:
+    """Render QtStealthOverlay's exact 7-point orange arrow polygon onto synthetic image."""
+    from vision_core.chess_rules import parse_sq
+
+    fr, fc = sq_to_screen_rc(parse_sq(mv[:2]), flipped=flipped)
+    tr, tc = sq_to_screen_rc(parse_sq(mv[2:4]), flipped=flipped)
+    x1, y1 = bx + (fc + 0.5) * sq, by + (fr + 0.5) * sq
+    x2, y2 = bx + (tc + 0.5) * sq, by + (tr + 0.5) * sq
+    dx, dy = x2 - x1, y2 - y1
+    dist = float(np.hypot(dx, dy))
+    ux, uy = dx / dist, dy / dist
+    px, py = -uy, ux
+    shaft_w = sq * 0.22
+    head_w = sq * 0.50
+    head_l = sq * 0.38
+    offset = sq * 0.12
+    sx, sy = x1 + ux * offset, y1 + uy * offset
+    nx, ny = x2 - ux * head_l, y2 - uy * head_l
+    poly = np.array(
+        [
+            [sx + px * (shaft_w / 2), sy + py * (shaft_w / 2)],
+            [nx + px * (shaft_w / 2), ny + py * (shaft_w / 2)],
+            [nx + px * (head_w / 2), ny + py * (head_w / 2)],
+            [x2, y2],
+            [nx - px * (head_w / 2), ny - py * (head_w / 2)],
+            [nx - px * (shaft_w / 2), ny - py * (shaft_w / 2)],
+            [sx - px * (shaft_w / 2), sy - py * (shaft_w / 2)],
+        ],
+        dtype=np.float32,
+    )
+    cv2.fillPoly(img, [np.rint(poly).astype(np.int32)], (11, 158, 245))
+    cv2.polylines(img, [np.rint(poly).astype(np.int32)], True, (0, 0, 0), 2)
+    return (x1, y1, x2, y2, sq)
+
+
 def test_simulated_game_sequence_with_arrow_mask_and_early_highlight():
     detector = BoardDetector()
     state = ChessBoardState.starting_position()
@@ -166,30 +201,31 @@ def test_simulated_game_sequence_with_arrow_mask_and_early_highlight():
     assert r0.status == "ok"
     assert r0.fen == START_FEN
 
-    # 2. Early highlight before piece bitmap updates on 1. e4
+    # 2. Highlights alone before pieces move must NOT prematurely advance state,
+    #    and a wide Qt orange arrow over the suggested move must NOT fabricate a phantom move!
     e2_sq, e4_sq = 12, 28
     img_hl = _render_synthetic_frame(state, highlights=(e2_sq, e4_sq))
-    r_hl = detector.process_frame(img_hl)
+    arrow_e2e4 = _draw_qt_arrow(img_hl, 240, 100, 75.0, "e2e4")
+    r_hl = detector.process_frame(img_hl, arrow_px=arrow_e2e4)
     assert r_hl.status == "ok"
-    assert r_hl.last_move == "e2e4"
-    assert r_hl.fen == state.push_uci("e2e4").to_fen()
+    assert r_hl.fen == START_FEN
+    assert r_hl.last_move == ""
 
-    # 3. Full settled frame after e2e4 -> e7e5 -> Nf3 (with arrow drawn on screen)
-    state = state.push_uci("e2e4")
-    img_settled = _render_synthetic_frame(state, highlights=(e2_sq, e4_sq))
-    r_same = detector.process_frame(img_settled)
-    assert r_same.status == "ok"
-    assert r_same.fen == state.to_fen()
+    # 3. Play 8 moves while drawing Qt-geometry arrows directly over candidate moves
+    moves = ("e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "g8f6", "e1g1", "f8c5")
+    for idx, mv in enumerate(moves):
+        # Verify an arrow drawn on the current position BEFORE the move NEVER fabricates a phantom move
+        pre_frame = _render_synthetic_frame(state)
+        pre_arrow = _draw_qt_arrow(pre_frame, 240, 100, 75.0, mv)
+        r_pre = detector.process_frame(pre_frame, arrow_px=pre_arrow)
+        assert r_pre.fen == state.to_fen(), f"Arrow caused phantom transition before {mv}: {r_pre.fen}"
 
-    for mv in ("e7e5", "g1f3", "b8c6", "f1c4", "g8f6", "e1g1"):
+        # Now apply the move while arrow is still overlaid on from_sq -> to_sq
         state = state.push_uci(mv)
-        arrow_px = (240 + 3.5 * 75, 100 + 6.5 * 75, 240 + 3.5 * 75, 100 + 4.5 * 75, 75)
-        frame = _render_synthetic_frame(
-            state,
-            arrow=((int(arrow_px[0]), int(arrow_px[1])), (int(arrow_px[2]), int(arrow_px[3]))),
-        )
-        res = detector.process_frame(frame, arrow_px=arrow_px)
-        assert res.status == "ok", f"Failed after {mv}: {res}"
+        frame = _render_synthetic_frame(state)
+        post_arrow = _draw_qt_arrow(frame, 240, 100, 75.0, mv)
+        res = detector.process_frame(frame, arrow_px=post_arrow)
+        assert res.status == "ok", f"Failed after {mv} (#{idx}): {res}"
         assert res.fen == state.to_fen(), f"FEN mismatch after {mv}: {res.fen} vs {state.to_fen()}"
 
 
@@ -314,3 +350,46 @@ def test_midslide_e2e3_does_not_corrupt_e2e4_and_slip_recovers_turn():
     assert r_rec.turn == "w"
     assert r_rec.last_move == "g7g5"
     assert r_rec.fen == after_g5.to_fen()
+
+
+def test_mid_slide_intermediate_square_revises_to_final_square():
+    detector = BoardDetector()
+    s0 = ChessBoardState.starting_position()
+    assert detector.process_frame(_render_synthetic_frame(s0)).status == "ok"
+
+    # Slide 1: e2 passes e3 without highlights -> settled on e4 must revise e2e3 -> e2e4
+    s_e3 = s0.push_uci("e2e3")
+    detector.process_frame(_render_synthetic_frame(s_e3))
+    s_e4 = s0.push_uci("e2e4")
+    r_e4 = detector.process_frame(_render_synthetic_frame(s_e4))
+    assert r_e4.fen == s_e4.to_fen()
+
+    # After 1... e5, White plays f1c4 passing intermediate squares e2 and d3 along the diagonal
+    s_e5 = s_e4.push_uci("e7e5")
+    assert detector.process_frame(_render_synthetic_frame(s_e5)).fen == s_e5.to_fen()
+    for mid_mv in ("f1e2", "f1d3"):
+        detector.process_frame(_render_synthetic_frame(s_e5.push_uci(mid_mv)))
+    s_c4 = s_e5.push_uci("f1c4")
+    r_c4 = detector.process_frame(_render_synthetic_frame(s_c4))
+    assert r_c4.fen == s_c4.to_fen()
+
+
+def test_template_self_healing_resync_after_multi_move_jump():
+    detector = BoardDetector()
+    state = ChessBoardState.starting_position()
+    assert detector.process_frame(_render_synthetic_frame(state)).status == "ok"
+
+    # Jump ahead by 5 plies (too far for 1-ply/2-ply tracking) without intermediate frames
+    for mv in ("e2e4", "e7e5", "g1f3", "b8c6", "f1c4"):
+        state = state.push_uci(mv)
+
+    from vision_core.chess_rules import parse_sq
+
+    jumped = _render_synthetic_frame(state, highlights=(parse_sq("f1"), parse_sq("c4")))
+    detector.process_frame(jumped)
+    res = detector.process_frame(jumped)
+    assert res.status == "ok"
+    assert res.source == "resync"
+    assert res.fen is not None
+    assert res.fen.split(" ")[:2] == state.to_fen().split(" ")[:2]
+

@@ -164,3 +164,45 @@ def test_sync_live_status_shows_native_vision_ready_without_killing_chrome(qapp,
         main.arrow_state.update(orig_state)
         cc.status_timer.stop()
         cc.close()
+
+
+def test_sync_live_status_preserves_arrow_when_vision_connected_without_window_title_match(qapp, monkeypatch):
+    _reset_hook_state()
+    orig_state = main.arrow_state.copy()
+    cc = main.ControlCenterWindow("TEST-KEY", "TEST-HWID")
+    cc.status_timer.stop()
+    try:
+        main.arrow_state.update({
+            "enabled": True,
+            "show": True,
+            "move": "e2e4",
+            "piece": "P",
+            "depth": "12",
+            "eval": "+0.35",
+            "last_seen": main.time.time(),
+            "last_ping": 0.0,
+            "vision_active": True,
+            "vision_status": "ok",
+            "detected_browser": "Google Chrome",
+        })
+        monkeypatch.setattr(main, "detect_active_chess_browser", lambda: None)
+
+        for _ in range(5):
+            cc._sync_live_status()
+
+        assert main.arrow_state["show"] is True
+        assert cc.status_card.from_sq.text() == "E2"
+
+        main.arrow_state.update({
+            "vision_active": False,
+            "last_seen": 0.0,
+        })
+        for _ in range(3):
+            cc._sync_live_status()
+
+        assert main.arrow_state["show"] is False
+    finally:
+        main.arrow_state.clear()
+        main.arrow_state.update(orig_state)
+        cc.status_timer.stop()
+        cc.close()

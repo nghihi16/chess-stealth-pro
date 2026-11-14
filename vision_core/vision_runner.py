@@ -5,7 +5,7 @@ import time
 from typing import Callable
 
 from vision_core.board_detector import BoardBounds, BoardDetector, capture_screen_bgr
-from vision_core.chess_rules import ChessBoardState, parse_sq, sq_to_screen_rc
+from vision_core.chess_rules import ChessBoardState, parse_sq, piece_side, sq_to_screen_rc
 from vision_core.native_engine import NativeStockfishEngine
 
 
@@ -21,7 +21,7 @@ class VisionRunner:
         browser_detect_fn: Callable[[], dict | None] | None = None,
         dpr_fn: Callable[[int], float] | None = None,
         on_repaint: Callable[[], None] | None = None,
-        poll_interval_s: float = 0.04,
+        poll_interval_s: float = 0.07,
     ):
         self.arrow_state = arrow_state
         self.engine = engine or NativeStockfishEngine()
@@ -44,6 +44,10 @@ class VisionRunner:
         self._active_dpr: float = 1.0
         self._active_fen: str = ""
         self._last_drawn_arrow_px: tuple[float, float, float, float, float] | None = None
+        self._cached_browser: dict | None = None
+        self._cached_dpr: float = 1.0
+        self._last_browser_check_ts: float = 0.0
+        self._no_board_streak: int = 0
 
     def _extension_is_fresh(self, now: float | None = None) -> bool:
         t = time.time() if now is None else now
@@ -82,6 +86,8 @@ class VisionRunner:
         return turn == my_side
 
     def _on_engine_update(self, payload: dict) -> None:
+        if payload.get("final", True) is False:
+            return
         mv = str(payload.get("move") or "")
         if len(mv) < 4:
             return
@@ -120,29 +126,40 @@ class VisionRunner:
                 except Exception:
                     piece_char = ""
 
-            self._last_drawn_arrow_px = (fx_px, fy_px, tx_px, ty_px, sq_px)
-            self.arrow_state.update(
-                {
-                    "x1": int(round(fx_px / dpr)),
-                    "y1": int(round(fy_px / dpr)),
-                    "x2": int(round(tx_px / dpr)),
-                    "y2": int(round(ty_px / dpr)),
-                    "size": max(16, int(round(sq_px / dpr))),
-                    "show": True,
-                    "move": mv,
-                    "ponder": str(payload.get("ponder") or ""),
-                    "depth": str(payload.get("depth") or ""),
-                    "eval": str(payload.get("eval") or "+0.0"),
-                    "piece": piece_char,
-                    "flipped": flipped,
-                    "auto_aligned": True,
-                    "offset_y": 0,
-                    "last_seen": time.time(),
-                    "vision_active": True,
-                    "vision_status": "active",
-                }
-            )
-        self._emit_repaint()
+            want_side = piece_side(piece_char) if piece_char else ("b" if flipped else "w")
+            if self.detector.is_square_occupied_by(from_sq, want_side) is False:
+                self.arrow_state["show"] = False
+                self._last_drawn_arrow_px = None
+                self._active_board_key = ""
+                self._last_req_sig = None
+                self.engine.stop_search()
+                need_clear = True
+            else:
+                need_clear = False
+                self._last_drawn_arrow_px = (fx_px, fy_px, tx_px, ty_px, sq_px)
+                self.arrow_state.update(
+                    {
+                        "x1": int(round(fx_px / dpr)),
+                        "y1": int(round(fy_px / dpr)),
+                        "x2": int(round(tx_px / dpr)),
+                        "y2": int(round(ty_px / dpr)),
+                        "size": max(16, int(round(sq_px / dpr))),
+                        "show": True,
+                        "move": mv,
+                        "ponder": str(payload.get("ponder") or ""),
+                        "depth": str(payload.get("depth") or ""),
+                        "eval": str(payload.get("eval") or "+0.0"),
+                        "piece": piece_char,
+                        "flipped": flipped,
+                        "auto_aligned": True,
+                        "offset_y": 0,
+                        "last_seen": time.time(),
+                        "vision_active": True,
+                        "vision_status": "active",
+                    }
+                )
+        if need_clear or self.arrow_state.get("show", False):
+            self._emit_repaint()
 
     def _current_arrow_px(self, dpr: float) -> tuple[float, float, float, float, float] | None:
         if not self.arrow_state.get("show", False):
@@ -187,21 +204,48 @@ class VisionRunner:
                 self._emit_repaint()
             return 0.25
 
-        detected = self.browser_detect_fn()
-        hwnd = int(detected.get("hwnd", 0) or 0) if detected else 0
+        if (now - self._last_browser_check_ts) >= 0.4 or self._last_browser_check_ts == 0.0:
+            detected = self.browser_detect_fn()
+            hwnd = int(detected.get("hwnd", 0) or 0) if detected else 0
+            self._cached_browser = detected
+            self._cached_dpr = max(0.5, float(self.dpr_fn(hwnd)))
+            self._last_browser_check_ts = now
+        else:
+            detected = self._cached_browser
+
         if detected and detected.get("name"):
             self.arrow_state["detected_browser"] = detected["name"]
 
-        dpr = max(0.5, float(self.dpr_fn(hwnd)))
+        dpr = self._cached_dpr
         arrow_px = self._current_arrow_px(dpr)
 
-        frame = self.capture_fn(None)
-        if frame is None:
+        b = self.detector.bounds
+        res = None
+        if b is not None:
+            rx = max(0, b.x - 16)
+            ry = max(0, b.y - 16)
+            rw = (b.x + b.size + 16) - rx
+            rh = (b.y + b.size + 16) - ry
+            frame = self.capture_fn((rx, ry, rw, rh))
+            if frame is not None:
+                roi_offset = (rx, ry) if (frame.shape[1] == rw and frame.shape[0] == rh) else (0, 0)
+                res = self.detector.process_frame(frame, arrow_px=arrow_px, roi_offset=roi_offset)
+            if res is None or res.status == "no_board":
+                frame_full = self.capture_fn(None)
+                if frame_full is not None:
+                    res = self.detector.process_frame(frame_full, arrow_px=arrow_px)
+        else:
+            frame = self.capture_fn(None)
+            if frame is not None:
+                res = self.detector.process_frame(frame, arrow_px=arrow_px)
+
+        if res is None:
             return 0.15
 
-        res = self.detector.process_frame(frame, arrow_px=arrow_px)
-
         if res.status == "no_board":
+            self._no_board_streak += 1
+            if self._no_board_streak < 4 and self._active_board_key:
+                return 0.12 if detected else 0.25
             need_repaint = False
             with self._lock:
                 if self._active_board_key:
@@ -212,6 +256,8 @@ class VisionRunner:
             if need_repaint:
                 self._emit_repaint()
             return 0.18 if detected else 0.30
+
+        self._no_board_streak = 0
 
         if res.status == "need_start_pos":
             need_repaint = False
@@ -277,26 +323,42 @@ class VisionRunner:
                 if req_sig != self._last_req_sig:
                     self._last_req_sig = req_sig
                     need_search = True
-                elif bounds_shifted and self.arrow_state.get("show", False) and self.arrow_state.get("move"):
-                    # Keep existing move arrow aligned immediately if browser window moved
-                    mv = self.arrow_state["move"]
+                elif self.arrow_state.get("show", False) and self.arrow_state.get("move"):
+                    mv = str(self.arrow_state["move"])
+                    origin_missing = False
                     try:
-                        fr, fc = sq_to_screen_rc(parse_sq(mv[:2]), flipped=res.flipped)
-                        tr, tc = sq_to_screen_rc(parse_sq(mv[2:4]), flipped=res.flipped)
-                        sq_px = res.bounds.size / 8.0
-                        fx_px = res.bounds.x + (fc + 0.5) * sq_px
-                        fy_px = res.bounds.y + (fr + 0.5) * sq_px
-                        tx_px = res.bounds.x + (tc + 0.5) * sq_px
-                        ty_px = res.bounds.y + (tr + 0.5) * sq_px
-                        self._last_drawn_arrow_px = (fx_px, fy_px, tx_px, ty_px, sq_px)
-                        self.arrow_state["x1"] = int(round(fx_px / dpr))
-                        self.arrow_state["y1"] = int(round(fy_px / dpr))
-                        self.arrow_state["x2"] = int(round(tx_px / dpr))
-                        self.arrow_state["y2"] = int(round(ty_px / dpr))
-                        self.arrow_state["size"] = max(16, int(round(sq_px / dpr)))
-                        need_repaint = True
+                        fsq = parse_sq(mv[:2])
+                        cur_piece = str(self.arrow_state.get("piece") or "")
+                        cur_side = (piece_side(cur_piece) if cur_piece else res.turn) or None
+                        if self.detector.is_square_occupied_by(fsq, cur_side) is False:
+                            origin_missing = True
                     except ValueError:
-                        pass
+                        origin_missing = True
+                    if origin_missing:
+                        self.arrow_state["show"] = False
+                        self._last_drawn_arrow_px = None
+                        self._last_req_sig = None
+                        self._active_board_key = ""
+                        need_repaint = True
+                    elif bounds_shifted:
+                        # Keep existing move arrow aligned immediately if browser window moved
+                        try:
+                            fr, fc = sq_to_screen_rc(parse_sq(mv[:2]), flipped=res.flipped)
+                            tr, tc = sq_to_screen_rc(parse_sq(mv[2:4]), flipped=res.flipped)
+                            sq_px = res.bounds.size / 8.0
+                            fx_px = res.bounds.x + (fc + 0.5) * sq_px
+                            fy_px = res.bounds.y + (fr + 0.5) * sq_px
+                            tx_px = res.bounds.x + (tc + 0.5) * sq_px
+                            ty_px = res.bounds.y + (tr + 0.5) * sq_px
+                            self._last_drawn_arrow_px = (fx_px, fy_px, tx_px, ty_px, sq_px)
+                            self.arrow_state["x1"] = int(round(fx_px / dpr))
+                            self.arrow_state["y1"] = int(round(fy_px / dpr))
+                            self.arrow_state["x2"] = int(round(tx_px / dpr))
+                            self.arrow_state["y2"] = int(round(ty_px / dpr))
+                            self.arrow_state["size"] = max(16, int(round(sq_px / dpr)))
+                            need_repaint = True
+                        except ValueError:
+                            pass
 
         if need_repaint:
             self._emit_repaint()

@@ -1818,6 +1818,24 @@ class StealthOverlayServer(BaseHTTPRequestHandler):
         return
 
 
+_OVERLAY_USER32 = None
+
+
+def _overlay_win32_user32():
+    global _OVERLAY_USER32
+    if _OVERLAY_USER32 is not None:
+        return _OVERLAY_USER32
+    u32 = ctypes.WinDLL("user32", use_last_error=True)
+    u32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+    u32.GetWindowLongW.restype = ctypes.c_long
+    u32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
+    u32.SetWindowLongW.restype = ctypes.c_long
+    u32.SetWindowDisplayAffinity.argtypes = [wintypes.HWND, wintypes.DWORD]
+    u32.SetWindowDisplayAffinity.restype = wintypes.BOOL
+    _OVERLAY_USER32 = u32
+    return u32
+
+
 class QtStealthOverlay(QWidget):
     def __init__(self):
         super().__init__()
@@ -1830,26 +1848,65 @@ class QtStealthOverlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
 
+        self._last_paint_sig = None
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
-        self.timer.start(20)
+        self.timer.start(60)
+
+    def _apply_win32_stealth(self):
+        if sys.platform != "win32":
+            return
+        try:
+            hwnd = int(self.winId())
+            if not hwnd:
+                return
+            u32 = _overlay_win32_user32()
+            ex_style = u32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            u32.SetWindowLongW(
+                hwnd,
+                GWL_EXSTYLE,
+                ex_style | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW,
+            )
+            u32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)
+        except Exception:
+            pass
 
     def showEvent(self, event):
         super().showEvent(event)
-        hwnd = int(self.winId())
-        ex_style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-        ctypes.windll.user32.SetWindowLongW(
-            hwnd,
-            GWL_EXSTYLE,
-            ex_style | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW,
+        self._apply_win32_stealth()
+        QTimer.singleShot(60, self._apply_win32_stealth)
+
+    def _current_paint_sig(self, now: float | None = None):
+        t = time.time() if now is None else now
+        vis = bool(
+            arrow_state["enabled"]
+            and arrow_state["show"]
+            and (t - arrow_state["last_seen"] <= 3.5)
         )
-        ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)
+        if not vis:
+            return (False,)
+        qcol = arrow_state.get("qcolor")
+        rgba = int(qcol.rgba()) if isinstance(qcol, QColor) else 0
+        return (
+            True,
+            int(arrow_state["x1"]),
+            int(arrow_state["y1"]),
+            int(arrow_state["x2"]),
+            int(arrow_state["y2"]),
+            int(arrow_state["size"]),
+            int(arrow_state["offset_y"]),
+            rgba,
+        )
 
     def _tick(self):
-        self.update()
+        sig = self._current_paint_sig()
+        if sig != self._last_paint_sig:
+            self._last_paint_sig = sig
+            self.update()
 
     def paintEvent(self, _event):
         now = time.time()
+        self._last_paint_sig = self._current_paint_sig(now)
         gate_scale = derive_arrow_scale_factor()
         crypto_state = get_crypto_verification_state()
         effective_scale = gate_scale * crypto_state
@@ -1858,7 +1915,7 @@ class QtStealthOverlay(QWidget):
             not arrow_state["enabled"]
             or effective_scale <= 0.0
             or not arrow_state["show"]
-            or (now - arrow_state["last_seen"] > 1.8)
+            or (now - arrow_state["last_seen"] > 3.5)
         ):
             return
 
@@ -4707,13 +4764,24 @@ class ControlCenterWindow(QWidget):
 
         detected = detect_active_chess_browser()
         if detected:
+            self._browser_miss_streak = 0
             b_name = detected["name"]
             arrow_state["detected_browser"] = b_name
             self._has_seen_browser = True
+        elif vision_connected:
+            self._browser_miss_streak = 0
+            b_name = arrow_state.get("detected_browser") or "Screen Vision"
+            arrow_state["detected_browser"] = b_name
+            self._has_seen_browser = True
         else:
-            b_name = None
-            arrow_state["detected_browser"] = None
-            arrow_state["show"] = False
+            miss = getattr(self, "_browser_miss_streak", 0) + 1
+            self._browser_miss_streak = miss
+            if miss < 3 and arrow_state.get("detected_browser"):
+                b_name = arrow_state.get("detected_browser")
+            else:
+                b_name = None
+                arrow_state["detected_browser"] = None
+                arrow_state["show"] = False
 
         was_closed = getattr(self, "_has_seen_browser", False) and (b_name is None)
         effective_connected = is_connected and (b_name is not None)
