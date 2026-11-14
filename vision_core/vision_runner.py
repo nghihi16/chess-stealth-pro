@@ -127,7 +127,10 @@ class VisionRunner:
                     piece_char = ""
 
             want_side = piece_side(piece_char) if piece_char else ("b" if flipped else "w")
-            if self.detector.is_square_occupied_by(from_sq, want_side) is False:
+            if (
+                self.detector.is_square_occupied_by(from_sq, want_side) is False
+                or (piece_char and not self.detector.verify_piece_at(from_sq, piece_char))
+            ):
                 self.arrow_state["show"] = False
                 self._last_drawn_arrow_px = None
                 self._active_board_key = ""

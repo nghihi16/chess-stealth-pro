@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import ctypes
 from ctypes import wintypes
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import cv2
 import numpy as np
 
 from vision_core.chess_rules import (
     START_FEN,
     ChessBoardState,
+    parse_sq,
     piece_side,
     screen_rc_to_sq,
     sq_to_screen_rc,
@@ -540,6 +541,8 @@ class _SquareObs:
     sil_20: np.ndarray | None = None
     lum_20: np.ndarray | None = None
     grad_energy: float = 0.0
+    sym_x: float = 0.0
+    arrow_masked: bool = False
 
 
 def _build_board_arrow_mask(
@@ -752,9 +755,11 @@ def _extract_square_observations(
                 rel_lum = ((c_gray - fg_mean) / 128.0) * valid_fg_2d.astype(np.float32)
                 sil_20 = cv2.resize(valid_fg_2d.astype(np.float32), (20, 20), interpolation=cv2.INTER_AREA)
                 lum_20 = cv2.resize(rel_lum, (20, 20), interpolation=cv2.INTER_AREA)
+                sym_x = float(np.mean(np.abs(sil_20 - sil_20[:, ::-1])))
             else:
                 sil_20 = None
                 lum_20 = None
+                sym_x = 0.0
 
             obs_list.append(
                 _SquareObs(
@@ -771,6 +776,8 @@ def _extract_square_observations(
                     sil_20=sil_20,
                     lum_20=lum_20,
                     grad_energy=grad_energy,
+                    sym_x=sym_x,
+                    arrow_masked=bool(c_mask is not None and not np.all(c_mask)),
                 )
             )
 
@@ -805,7 +812,7 @@ class BoardDetector:
         self._black_fg_bgr: np.ndarray | None = None
         self._prev_patches: dict[int, np.ndarray] = {}
         self._piece_patches: dict[str, np.ndarray] = {}  # canonical 28x28 piece appearance per FEN char
-        self._piece_templates: dict[str, tuple[np.ndarray, np.ndarray, float]] = {}
+        self._piece_templates: dict[str, tuple[np.ndarray, np.ndarray, float, float]] = {}
         self._prev_occ_sig: tuple[int, int] | None = None
         self._mismatch_streak: int = 0
         self._prev_fast_thumb: np.ndarray | None = None
@@ -828,6 +835,33 @@ class BoardDetector:
                         return False
                 return True
         return None
+
+    def verify_piece_at(self, sq: int | str, expected_piece: str) -> bool:
+        """Verify visually that expected_piece (e.g. 'Q' vs 'N') is not clearly contradicted at sq."""
+        if not expected_piece:
+            return True
+        try:
+            sq_idx = parse_sq(sq) if isinstance(sq, str) else int(sq)
+        except ValueError:
+            return False
+        want_side = piece_side(expected_piece)
+        if self.is_square_occupied_by(sq_idx, want_side) is False:
+            return False
+        if not self.last_obs or not self._piece_templates or expected_piece.upper() not in ("Q", "R", "B", "N"):
+            return True
+        obs_sq = next((o for o in self.last_obs if o.sq_idx == sq_idx), None)
+        if obs_sq is None or obs_sq.occluded or obs_sq.sil_20 is None:
+            return True
+        exp_cost = self._template_cost(obs_sq, expected_piece)
+        kinds = ("Q", "R", "B", "N") if want_side == "w" else ("q", "r", "b", "n")
+        for alt_ch in kinds:
+            if alt_ch == expected_piece:
+                continue
+            if alt_ch not in self._piece_templates and alt_ch not in self._piece_patches:
+                continue
+            if self._template_cost(obs_sq, alt_ch) + 0.12 < exp_cost:
+                return False
+        return True
 
     @staticmethod
     def _is_start_occupancy(obs: list[_SquareObs]) -> bool:
@@ -880,6 +914,7 @@ class BoardDetector:
         sils_by_ch: dict[str, list[np.ndarray]] = {}
         lums_by_ch: dict[str, list[np.ndarray]] = {}
         fracs_by_ch: dict[str, list[float]] = {}
+        syms_by_ch: dict[str, list[float]] = {}
         for o in obs:
             ch = grid[o.row][o.col]
             if ch and not o.occluded:
@@ -888,24 +923,78 @@ class BoardDetector:
                     sils_by_ch.setdefault(ch, []).append(o.sil_20)
                     lums_by_ch.setdefault(ch, []).append(o.lum_20)
                     fracs_by_ch.setdefault(ch, []).append(o.fg_frac)
+                    syms_by_ch.setdefault(ch, []).append(o.sym_x)
         for ch, sils in sils_by_ch.items():
             mean_sil = np.mean(np.stack(sils, axis=0), axis=0)
             mean_lum = np.mean(np.stack(lums_by_ch[ch], axis=0), axis=0)
             mean_frac = float(np.mean(fracs_by_ch[ch]))
-            self._piece_templates[ch] = (mean_sil, mean_lum, mean_frac)
+            mean_sym = float(np.mean(syms_by_ch[ch]))
+            self._piece_templates[ch] = (mean_sil, mean_lum, mean_frac, mean_sym)
 
     def _template_cost(self, o: _SquareObs, ch: str) -> float:
         tpl = self._piece_templates.get(ch)
         if tpl is not None and o.sil_20 is not None and o.lum_20 is not None:
-            t_sil, t_lum, t_frac = tpl
+            t_sil, t_lum, t_frac = tpl[:3]
+            t_sym = tpl[3] if len(tpl) >= 4 else 0.0
             d_sil = float(np.mean(np.abs(o.sil_20 - t_sil)))
             d_lum = float(np.mean(np.abs(o.lum_20 - t_lum)))
             d_frac = abs(o.fg_frac - t_frac)
-            return d_sil * 1.4 + d_lum * 0.8 + d_frac * 0.5
+            d_sym = abs(o.sym_x - t_sym)
+            return d_sil * 1.4 + d_lum * 0.8 + d_frac * 0.6 + d_sym * 1.8
         ref = self._piece_patches.get(ch)
         if ref is not None:
             return float(np.mean(np.abs(o.patch_bgr.astype(np.float32) - ref.astype(np.float32)))) / 255.0
         return 1.0
+
+    def _move_template_cost(
+        self,
+        base_state: ChessBoardState,
+        uci: str,
+        obs_by_sq: dict[int, _SquareObs],
+    ) -> float:
+        """Mean piece-template cost over non-occluded occupied changed squares of a candidate move."""
+        nxt = base_state.push_uci(uci)
+        costs: list[float] = []
+        for sq in range(64):
+            p = nxt.board[sq]
+            if p != base_state.board[sq] and p:
+                o = obs_by_sq.get(sq)
+                if o is not None and not o.occluded:
+                    costs.append(self._template_cost(o, p))
+        return float(sum(costs) / len(costs)) if costs else 0.5
+
+    def _repair_swapped_pieces(self, obs_by_sq: dict[int, _SquareObs]) -> bool:
+        """Swap any transposed major/minor pieces (e.g. Q vs N) of the same color if templates strongly favor it."""
+        if self.state is None or not self._piece_templates:
+            return False
+        board = list(self.state.board)
+        repaired = False
+        for side in ("w", "b"):
+            sqs = [
+                sq for sq in range(64)
+                if board[sq]
+                and piece_side(board[sq]) == side
+                and board[sq].upper() in ("Q", "R", "B", "N")
+                and sq in obs_by_sq
+                and not obs_by_sq[sq].occluded
+                and obs_by_sq[sq].occupied
+            ]
+            for i in range(len(sqs)):
+                sq1 = sqs[i]
+                for j in range(i + 1, len(sqs)):
+                    sq2 = sqs[j]
+                    ch1, ch2 = board[sq1], board[sq2]
+                    if ch1 == ch2:
+                        continue
+                    o1, o2 = obs_by_sq[sq1], obs_by_sq[sq2]
+                    cur_cost = self._template_cost(o1, ch1) + self._template_cost(o2, ch2)
+                    swap_cost = self._template_cost(o1, ch2) + self._template_cost(o2, ch1)
+                    if swap_cost + 0.08 < cur_cost:
+                        board[sq1], board[sq2] = ch2, ch1
+                        repaired = True
+        if repaired:
+            self.state = replace(self.state, board=tuple(board))
+        return repaired
 
     def _record_patches(self, obs: list[_SquareObs], flipped: bool) -> None:
         self._prev_patches.clear()
@@ -919,7 +1008,7 @@ class BoardDetector:
         return " ".join(state.to_fen().split(" ")[:4])
 
     def _classify_side(self, o: _SquareObs) -> str:
-        if not o.occupied:
+        if not o.occupied or o.arrow_masked:
             return ""
         if self._white_fg_bgr is None or self._black_fg_bgr is None:
             return "w" if o.fg_lum >= 140.0 else "b"
@@ -1011,7 +1100,25 @@ class BoardDetector:
         hl_hits = [p for p in hits if self._move_matches_highlight(p[2], hl_pair)]
         if hl_hits:
             hits = hl_hits
-        return hits[0] if len(hits) == 1 else None
+        if len(hits) == 1:
+            return hits[0]
+        if len(hits) > 1 and self._piece_templates:
+            scored_hits: list[tuple[float, int, tuple[ChessBoardState, ChessBoardState, str]]] = []
+            for idx_hit, item in enumerate(hits):
+                _, s2, _ = item
+                score = sum(
+                    self._template_cost(obs_by_sq[sq], s2.board[sq])
+                    for sq in range(64)
+                    if s2.board[sq] != base_state.board[sq]
+                    and s2.board[sq]
+                    and sq in obs_by_sq
+                    and not obs_by_sq[sq].occluded
+                )
+                scored_hits.append((score, idx_hit, item))
+            scored_hits.sort(key=lambda x: x[0])
+            if scored_hits[0][0] + 0.04 < scored_hits[1][0]:
+                return scored_hits[0][2]
+        return None
 
     def _refine_promotion(
         self, mv: str, obs_by_sq: dict[int, _SquareObs], side: str
@@ -1048,6 +1155,8 @@ class BoardDetector:
         self._mismatch_streak = 0
         self.last_obs = obs
         self._record_patches(obs, self.flipped)
+        obs_by_sq = {screen_rc_to_sq(o.row, o.col, flipped=self.flipped): o for o in obs}
+        self._repair_swapped_pieces(obs_by_sq)
         return DetectionResult(
             status="ok",
             bounds=bounds,
@@ -1116,33 +1225,68 @@ class BoardDetector:
                 return None
 
             k_char = "K" if side == "w" else "k"
+            q_char = "Q" if side == "w" else "q"
+            r_char = "R" if side == "w" else "r"
+            b_char = "B" if side == "w" else "b"
+            n_char = "N" if side == "w" else "n"
             p_char = "P" if side == "w" else "p"
-            non_king_kinds = ("Q", "R", "B", "N", "P") if side == "w" else ("q", "r", "b", "n", "p")
+            non_king_kinds = (q_char, r_char, b_char, n_char, p_char)
 
             # Choose unique King square
             best_k_sq = min(sqs, key=lambda sq: self._template_cost(obs_by_sq[sq], k_char))
             board[best_k_sq] = k_char
 
-            # Assign remaining pieces greedily, disallowing pawns on ranks 1 & 8 and capping pawns <= 8
-            pawn_candidates: list[tuple[float, int, str]] = []
-            for sq in sqs:
-                if sq == best_k_sq:
-                    continue
+            std_caps = {q_char: 1, r_char: 2, b_char: 2, n_char: 2, p_char: 8}
+            if self.state is not None:
+                max_counts = {
+                    ch: max(cap, sum(1 for x in self.state.board if x == ch))
+                    for ch, cap in std_caps.items()
+                }
+            else:
+                max_counts = dict(std_caps)
+            used_counts = {ch: 0 for ch in non_king_kinds}
+
+            # Assign pieces in descending confidence margin order with FIDE inventory caps
+            sqs_no_k = [sq for sq in sqs if sq != best_k_sq]
+            candidates: list[tuple[float, int, list[tuple[float, str]]]] = []
+            for sq in sqs_no_k:
                 o = obs_by_sq[sq]
                 rank = sq // 8
                 allowed = [ch for ch in non_king_kinds if not (ch == p_char and rank in (0, 7))]
                 scored = sorted((self._template_cost(o, ch), ch) for ch in allowed)
-                best_c, best_ch = scored[0]
-                if best_ch == p_char:
-                    second_ch = scored[1][1] if len(scored) > 1 else ("Q" if side == "w" else "q")
-                    margin = (scored[1][0] - best_c) if len(scored) > 1 else 1.0
-                    pawn_candidates.append((-margin, sq, second_ch))
-                else:
-                    board[sq] = best_ch
+                margin = (scored[1][0] - scored[0][0]) if len(scored) > 1 else 1.0
+                candidates.append((-margin, sq, scored))
 
-            pawn_candidates.sort()
-            for idx, (_, sq, fallback_ch) in enumerate(pawn_candidates):
-                board[sq] = p_char if idx < 8 else fallback_ch
+            candidates.sort(key=lambda item: item[0])
+            for _, sq, scored in candidates:
+                chosen_ch = scored[0][1]
+                for _, ch in scored:
+                    if used_counts[ch] < max_counts[ch]:
+                        chosen_ch = ch
+                        break
+                board[sq] = chosen_ch
+                used_counts[chosen_ch] += 1
+
+            # 2-opt pairwise swap check to ensure global best piece-type assignment (e.g. Q vs N)
+            for _ in range(3):
+                swapped = False
+                for i in range(len(sqs_no_k)):
+                    sq1 = sqs_no_k[i]
+                    for j in range(i + 1, len(sqs_no_k)):
+                        sq2 = sqs_no_k[j]
+                        ch1, ch2 = board[sq1], board[sq2]
+                        if ch1 == ch2:
+                            continue
+                        if (ch2 == p_char and sq1 // 8 in (0, 7)) or (ch1 == p_char and sq2 // 8 in (0, 7)):
+                            continue
+                        o1, o2 = obs_by_sq[sq1], obs_by_sq[sq2]
+                        cur_c = self._template_cost(o1, ch1) + self._template_cost(o2, ch2)
+                        swap_c = self._template_cost(o1, ch2) + self._template_cost(o2, ch1)
+                        if swap_c + 1e-6 < cur_c:
+                            board[sq1], board[sq2] = ch2, ch1
+                            swapped = True
+                if not swapped:
+                    break
 
         # Infer castling rights from current K/R placement intersected with previous rights
         prev_c = set(self.state.castling) if self.state else {"K", "Q", "k", "q"}
@@ -1334,7 +1478,7 @@ class BoardDetector:
                 got_side = expected_sides[sq]
                 if got_side and got_side != piece_side(cur_piece):
                     changed_visual.add(sq)
-                elif sq in self._prev_patches:
+                elif not o.arrow_masked and sq in self._prev_patches:
                     old_p = self._prev_patches[sq]
                     if old_p.shape == o.patch_bgr.shape:
                         diff = float(np.mean(np.abs(o.patch_bgr.astype(np.float32) - old_p.astype(np.float32))))
@@ -1350,7 +1494,25 @@ class BoardDetector:
                 hl_mv = hl_hits[0]
 
         # 1. Steady state: board matches self.state — never speculate before physical piece pixels move
-        if not changed_occ and not (changed_visual and len(changed_visual) >= 2):
+        side_flipped_sq = any(
+            self.state.board[sq] and expected_sides.get(sq, "") not in ("", piece_side(self.state.board[sq]))
+            for sq in changed_visual
+        )
+        if not changed_occ and not (len(changed_visual) >= 2 or (side_flipped_sq and any(o.occluded for o in obs))):
+            if self._repair_swapped_pieces(obs_by_sq):
+                self._prev_occ_sig = None
+                self._mismatch_streak = 0
+                self._record_patches(obs, self.flipped)
+                return DetectionResult(
+                    status="ok",
+                    bounds=screen_bounds,
+                    fen=self.state.to_fen(),
+                    flipped=self.flipped,
+                    board_key=self._board_key(self.state),
+                    turn=self.state.turn,
+                    last_move="",
+                    source="resync",
+                )
             self._prev_occ_sig = None
             self._mismatch_streak = 0
             self._record_patches(obs, self.flipped)
@@ -1420,12 +1582,27 @@ class BoardDetector:
                 exact_hits = self.state.infer_move_for_changed_squares(changed_occ, occ_occ)
             if not exact_hits:
                 exact_hits = self.state.infer_move_for_changed_squares(changed_occ or changed_ref)
-            exact_mv = exact_hits[0] if len(exact_hits) == 1 else None
+            exact_hits = [
+                mv for mv in exact_hits
+                if self._match_state_error(
+                    self.state.push_uci(mv), obs_by_sq, self.flipped, expected_sides, prev_state=self.state
+                ) == 0.0
+            ]
+            exact_mv = None
+            if len(exact_hits) == 1:
+                exact_mv = exact_hits[0]
+            elif len(exact_hits) > 1 and self._piece_templates:
+                scored_exact = sorted(
+                    (self._move_template_cost(self.state, mv, obs_by_sq), mv)
+                    for mv in exact_hits
+                )
+                if scored_exact[0][0] + 0.04 < scored_exact[1][0]:
+                    exact_mv = scored_exact[0][1]
 
             if exact_mv is None:
                 best_err = 999.0
                 second_err = 999.0
-                best_mv = None
+                best_mvs: list[str] = []
                 for mv in legal:
                     ns = self.state.push_uci(mv)
                     err = self._match_state_error(
@@ -1434,11 +1611,22 @@ class BoardDetector:
                     if err < best_err:
                         second_err = best_err
                         best_err = err
-                        best_mv = mv
+                        best_mvs = [mv]
+                    elif err == best_err:
+                        second_err = min(second_err, err)
+                        best_mvs.append(mv)
                     elif err < second_err:
                         second_err = err
-                if best_mv is not None and best_err == 0.0 and second_err > 0.0:
-                    exact_mv = best_mv
+                if best_mvs and best_err == 0.0:
+                    if len(best_mvs) == 1 and second_err > 0.0:
+                        exact_mv = best_mvs[0]
+                    elif len(best_mvs) > 1 and self._piece_templates:
+                        scored_best = sorted(
+                            (self._move_template_cost(self.state, mv, obs_by_sq), mv)
+                            for mv in best_mvs
+                        )
+                        if scored_best[0][0] + 0.04 < scored_best[1][0]:
+                            exact_mv = scored_best[0][1]
 
             # Guard against transient mid-slide mismatch (e.g. e2->e4 crossing e3 while (e2,e4) are lit)
             if hl_mv is not None:

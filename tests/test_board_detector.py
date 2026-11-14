@@ -14,7 +14,7 @@ from vision_core.board_detector import (
     BoardDetector,
     locate_board_bgr,
 )
-from vision_core.chess_rules import START_FEN, ChessBoardState, sq_to_screen_rc
+from vision_core.chess_rules import START_FEN, ChessBoardState, screen_rc_to_sq, sq_to_screen_rc
 
 
 ARTIFACT_DIR = r"C:\Users\Windows\.gemini\antigravity-cli\brain\cc3b4c1b-8ad3-4a28-9821-be072a60b176"
@@ -392,4 +392,73 @@ def test_template_self_healing_resync_after_multi_move_jump():
     assert res.source == "resync"
     assert res.fen is not None
     assert res.fen.split(" ")[:2] == state.to_fen().split(" ")[:2]
+
+
+def test_queen_vs_knight_disambiguation_and_swap_self_repair():
+    from dataclasses import replace
+    from vision_core.chess_rules import parse_sq
+
+    bx, by, sq = 240, 100, 75
+
+    def _play_setup() -> tuple[BoardDetector, ChessBoardState]:
+        det = BoardDetector()
+        s = ChessBoardState.starting_position()
+        assert det.process_frame(_render_synthetic_frame(s)).status == "ok"
+        for mv in ("d2d4", "e7e5", "d4e5", "b8c6", "g1f3", "d7d6", "d1d3", "c6d4"):
+            s = s.push_uci(mv)
+            res_step = det.process_frame(_render_synthetic_frame(s, highlights=(parse_sq(mv[:2]), parse_sq(mv[2:4]))))
+            assert res_step.status == "ok"
+        assert det.state is not None and det.state.to_fen() == s.to_fen()
+        return det, s
+
+    # (a) Both Qd3xd4 (d3d4) and Nf3xd4 (f3d4) are legal captures onto d4 while a Qt arrow b3->g3
+    #     crosses rank 3 over both d3 and f3. Detector must never confuse Q capture with N capture.
+    det_q, s_base = _play_setup()
+    s_qd4 = s_base.push_uci("d3d4")
+    fr_q = _render_synthetic_frame(s_qd4)
+    apx_q = _draw_qt_arrow(fr_q, bx, by, float(sq), "b3g3")
+    res_q = det_q.process_frame(fr_q, arrow_px=apx_q)
+    assert res_q.last_move == "d3d4"
+    assert det_q.state is not None
+    assert det_q.state.board[parse_sq("d4")] == "Q"
+    assert det_q.state.board[parse_sq("f3")] == "N"
+
+    det_n, s_base_n = _play_setup()
+    s_nd4 = s_base_n.push_uci("f3d4")
+    fr_n = _render_synthetic_frame(s_nd4)
+    apx_n = _draw_qt_arrow(fr_n, bx, by, float(sq), "b3g3")
+    res_n = det_n.process_frame(fr_n, arrow_px=apx_n)
+    assert res_n.last_move == "f3d4"
+    assert det_n.state is not None
+    assert det_n.state.board[parse_sq("d4")] == "N"
+    assert det_n.state.board[parse_sq("d3")] == "Q"
+
+    # (b) Artificially swap Q and N in state while true board has Q on d4 and N on f3:
+    #     verify_piece_at detects mismatch on last_obs, and steady-state self-repair swaps them back.
+    det_rep, _ = _play_setup()
+    assert det_rep.process_frame(_render_synthetic_frame(s_qd4)).last_move == "d3d4"
+    assert det_rep.verify_piece_at("d4", "Q") is True
+    assert det_rep.verify_piece_at("d4", "N") is False
+
+    corrupted = list(s_qd4.board)
+    corrupted[parse_sq("d4")] = "N"
+    corrupted[parse_sq("f3")] = "Q"
+    det_rep.state = replace(s_qd4, board=tuple(corrupted))
+    det_rep._prev_fast_thumb = None
+    repaired_res = det_rep.process_frame(_render_synthetic_frame(s_qd4))
+    assert repaired_res.status == "ok"
+    assert repaired_res.source == "resync"
+    assert det_rep.state.board[parse_sq("d4")] == "Q"
+    assert det_rep.state.board[parse_sq("f3")] == "N"
+
+    # (c) Reconstructed board respects inventory limits (<= 1 Q, <= 2 N)
+    det_rec, _ = _play_setup()
+    obs_clean = det_rec.last_obs
+    obs_by_sq = {screen_rc_to_sq(o.row, o.col, flipped=det_rec.flipped): o for o in obs_clean}
+    expected_sides = {sq_i: det_rec._classify_side(o) for sq_i, o in obs_by_sq.items()}
+    rec = det_rec._reconstruct_state_from_templates(obs_by_sq, expected_sides, None)
+    assert rec is not None
+    assert rec.board.count("Q") <= 1
+    assert rec.board.count("N") <= 2
+
 

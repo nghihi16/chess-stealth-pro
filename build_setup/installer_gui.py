@@ -18,7 +18,7 @@ import winreg
 import re
 
 GITHUB_REPO = "nghihi16/chess-stealth-pro"
-APP_VERSION = "3.2.5"
+APP_VERSION = "3.2.6"
 
 def parse_version(tag):
     cleaned = re.sub(r'^[vV]', '', str(tag).strip())
@@ -58,13 +58,11 @@ def resolve_installer_update_state(result, installed_version, bundled_version=AP
         download_url = remote_url
         source_ver = remote_ver
         source_tag = remote_tag or bundled_tag
-        source_label = "available on GitHub"
         new_version = source_tag
     else:
         download_url = None
         source_ver = bundled_ver
         source_tag = bundled_tag
-        source_label = "ready to install"
         new_version = bundled_version
 
     if not is_update_mode:
@@ -80,7 +78,7 @@ def resolve_installer_update_state(result, installed_version, bundled_version=AP
         return {
             "download_url": download_url,
             "new_version": new_version,
-            "badge_text": f"✦ New version {source_tag} {source_label}",
+            "badge_text": f"New version {source_tag}",
             "highlight": True,
             "btn_text": f"Update to {source_tag}",
         }
@@ -836,7 +834,7 @@ class InstallWorker(QThread):
             time.sleep(0.1)
 
             if self.download_url:
-                self.progress.emit(6, "Connecting to GitHub Releases...")
+                self.progress.emit(6, "Downloading update...")
                 import urllib.request
                 req = urllib.request.Request(
                     self.download_url,
